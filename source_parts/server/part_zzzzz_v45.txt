@@ -1,0 +1,214 @@
+# v4.5: Reaction Rush + automatic classic Mafia
+
+GAMES.update({
+    'reaction':{'rank':17,'emoji':'⚡','title':'반응속도','cat':'순발력/함정','players':'2~12명','time':'5~10분','duration':8*60,'desc':'진짜 신호와 멈춤 함정을 구분해 가장 빠르게 반응하는 초단기 순발력전.','guide':['화면에 신호가 뜰 때까지 기다립니다.','초록 GO면 최대한 빨리 누르고, STOP이면 절대 누르지 않습니다.','신호 전에 누르면 성급한 반응으로 해당 라운드 점수를 받지 못합니다.','반응시간과 오답 행동이 라운드마다 공개됩니다.']},
+    'mafia':{'rank':18,'emoji':'🕶️','title':'마피아','cat':'정통 추리','players':'5~12명','time':'10~20분','duration':18*60,'desc':'마피아·시민·경찰·의사가 밤 행동과 낮 토론을 반복하는 빠른 정통 마피아. 사회자 없이 자동 진행됩니다.','guide':['역할은 자기 휴대폰에서만 확인합니다.','밤에는 마피아가 제거 대상을, 경찰이 조사 대상을, 의사가 보호 대상을 고릅니다.','낮에는 모두 토론한 뒤 살아있는 사람끼리 투표합니다.','마피아가 모두 제거되면 시민팀, 마피아 수가 시민팀 이상이면 마피아팀 승리입니다.']}
+})
+
+# ---------- Reaction ----------
+def setup_reaction(room):
+    pids=active_pids(room);room['assignments']={};room['pending']={};room['submissions']={};room['votes']={};room['round_result']=None;room['round_no']=1
+    for p in pids:make_assignment(room,p,'플레이어','신호가 뜰 때까지 기다리세요.',None,{'reaction_status':'ready'})
+    room['game_data']={'start_scores':{p:room['players'][p]['score'] for p in pids},'reaction_index':0,'reaction_total':8,'reaction_stage':'ready','reaction_last_mode':None}
+    room['public']={'event_title':'반응속도 준비','event_text':'성급하게 누르면 그 라운드는 점수를 받을 수 없습니다.','story':None,'special':None}
+    room['phase']='countdown';room['phase_started']=now();room['deadline']=now()+4;room['interaction_deadline']=None;room['paused']=False;room['pause_remaining']=None;room['paused_at']=None
+
+def start_reaction_round(room):
+    gd=room['game_data'];idx=gd['reaction_index'];pids=active_pids(room);room['submissions']={};room['round_result']=None;room['round_no']=idx+1
+    mode='stop' if gd.get('reaction_last_mode')!='stop' and random.random()<.28 else 'go';gd['reaction_last_mode']=mode;gd['reaction_mode']=mode;gd['reaction_stage']='wait';gd['reaction_false']={};gd['reaction_cue_at']=now()+random.uniform(1.6,3.8);gd['reaction_resolve_at']=gd['reaction_cue_at']+1.7
+    for p in pids:make_assignment(room,p,'플레이어','기다리세요…',None,{'reaction_status':'wait'})
+    room['public']['event_title']=f'ROUND {idx+1}/{gd["reaction_total"]}';room['public']['event_text']='아직 누르지 마세요.';room['deadline']=gd['reaction_resolve_at'];room['interaction_deadline']=gd['reaction_resolve_at']
+
+def cue_reaction(room):
+    gd=room['game_data'];mode=gd['reaction_mode'];gd['reaction_stage']='cue';room['public']['event_title']='GO!' if mode=='go' else 'STOP!';room['public']['event_text']='지금 누르세요!' if mode=='go' else '누르면 안 됩니다!'
+    for p in active_pids(room):
+        a=room['assignments'].get(p)
+        if a:a['mission']='지금 누르세요!' if mode=='go' else '절대 누르지 마세요!';a.setdefault('extra',{})['reaction_status']=mode
+
+def reaction_tap(room,pid):
+    gd=room['game_data'];stage=gd.get('reaction_stage')
+    if pid in room.get('submissions',{}) or pid in gd.setdefault('reaction_false',{}):raise ValueError('이번 라운드에는 이미 반응했습니다.')
+    if stage=='wait':
+        gd['reaction_false'][pid]=now();append_private_notice(room,pid,'너무 빨랐습니다. 이번 라운드는 0점입니다.');return
+    if stage!='cue':raise ValueError('지금은 누를 수 없습니다.')
+    room['submissions'][pid]={'ts':now(),'ms':max(0,int((now()-gd['reaction_cue_at'])*1000))}
+    if gd['reaction_mode']=='go' and len(room['submissions'])+len(gd.get('reaction_false',{}))>=len(active_pids(room)):resolve_reaction(room)
+
+def resolve_reaction(room):
+    gd=room['game_data'];mode=gd['reaction_mode'];pids=active_pids(room);false=set(gd.get('reaction_false',{}));subs=room.get('submissions',{});rows=[];winners=[]
+    if mode=='go':
+        valid=sorted([(v['ms'],p) for p,v in subs.items() if p not in false]);pts={}
+        for i,(ms,p) in enumerate(valid):pts[p]=3 if i==0 else 2 if i==1 else 1
+        for p in pids:
+            if p in false:choice='성급함';ok=False
+            elif p in subs:choice=f'{subs[p]["ms"]}ms';ok=True
+            else:choice='미반응';ok=False
+            if p in pts:score(room,p,pts[p]);winners.append(p)
+            rows.append({'player':room['players'][p]['name'],'choice':choice,'correct':ok,'fastest':bool(valid and p==valid[0][1]),'points':pts.get(p,0)})
+        title=(room['players'][valid[0][1]]['name']+f' · {valid[0][0]}ms') if valid else '유효 반응 없음'
+    else:
+        for p in pids:
+            safe=p not in false and p not in subs
+            if safe:score(room,p,2);winners.append(p)
+            rows.append({'player':room['players'][p]['name'],'choice':'참음' if safe else '눌러버림','correct':safe,'points':2 if safe else 0})
+        title='STOP 함정 · '+(f'{len(winners)}명 생존' if winners else '전원 낚였습니다')
+    room['round_result']={'stage':'reaction_result','title':title,'answers':rows,'winner_ids':winners};gd['reaction_stage']='result';room['public']['event_title']='결과';room['public']['event_text']=title;room['interaction_deadline']=now()+3.5;room['deadline']=room['interaction_deadline']
+
+def next_reaction(room):
+    gd=room['game_data'];gd['reaction_index']+=1
+    if gd['reaction_index']>=gd['reaction_total']:finish_game(room)
+    else:start_reaction_round(room)
+
+# ---------- Classic Mafia ----------
+def mafia_alive(room):return [p for p in active_pids(room) if room['players'][p].get('alive')]
+def mafia_roles(room,role=None):return [p for p in mafia_alive(room) if (room['assignments'].get(p) or {}).get('role')==(role or '마피아')]
+def mafia_check_win(room):
+    alive=mafia_alive(room);maf=[p for p in alive if (room['assignments'].get(p) or {}).get('role')=='마피아'];town=[p for p in alive if p not in maf]
+    if not maf:
+        winners=[p for p in active_pids(room) if (room['assignments'].get(p) or {}).get('role')!='마피아'];label='시민팀 승리 · 마피아 전원 제거'
+    elif len(maf)>=len(town):
+        winners=[p for p in active_pids(room) if (room['assignments'].get(p) or {}).get('role')=='마피아'];label='마피아팀 승리 · 시민팀 장악'
+    else:return False
+    for p in winners:score(room,p,4)
+    room['game_data']['forced_winners']=winners;room['game_data']['result_label']=label;finish_game(room);return True
+
+def setup_mafia(room):
+    pids=shuffled_active(room);n=len(pids);mcount=1 if n<=6 else 2 if n<=10 else 3;roles=['마피아']*mcount+['시민']*(n-mcount)
+    if n>=6:roles[mcount]='경찰'
+    if n>=7:roles[mcount+1]='의사'
+    random.shuffle(roles);room['assignments']={};room['pending']={};room['submissions']={};room['votes']={};room['round_result']=None;room['round_no']=1
+    for p,r in zip(pids,roles):room['players'][p]['alive']=True;make_assignment(room,p,r,'밤이 되면 역할에 맞는 행동을 하세요.' if r!='시민' else '낮 토론에서 마피아를 찾아내세요.',None,{'mafia_notice':''})
+    maf=[p for p in pids if room['assignments'][p]['role']=='마피아']
+    for p in maf:
+        mates=[room['players'][x]['name'] for x in maf if x!=p];append_private_notice(room,p,'마피아 팀: '+(', '.join(mates) if mates else '당신 혼자입니다.'))
+    room['game_data']={'start_scores':{p:room['players'][p]['score'] for p in pids},'mafia_day':1,'mafia_stage':'ready','mafia_actions':{},'doctor_last_target':None}
+    room['public']={'event_title':'마피아 준비','event_text':'역할은 자기 화면만 확인하세요.','story':None,'special':None};room['phase']='countdown';room['phase_started']=now();room['deadline']=now()+5;room['interaction_deadline']=None;room['paused']=False;room['pause_remaining']=None;room['paused_at']=None
+
+def start_mafia_night(room):
+    gd=room['game_data'];gd['mafia_stage']='night';gd['mafia_actions']={};room['submissions']={};room['votes']={};room['round_result']=None;alive=mafia_alive(room);sec=22
+    room['public']['event_title']=f'{gd["mafia_day"]}일차 밤';room['public']['event_text']='밤 행동을 선택하세요. 시민은 조용히 기다립니다.'
+    for p in alive:
+        r=room['assignments'][p]['role'];room['assignments'][p]['mission']='제거할 사람을 고르세요.' if r=='마피아' else '조사할 사람을 고르세요.' if r=='경찰' else '보호할 사람을 고르세요.' if r=='의사' else '밤이 지나가기를 기다리세요.'
+    room['interaction_deadline']=now()+sec;room['deadline']=room['interaction_deadline']
+
+def mafia_night_action(room,pid,target):
+    gd=room['game_data'];alive=mafia_alive(room)
+    if gd.get('mafia_stage')!='night' or pid not in alive:raise ValueError('지금은 밤 행동을 할 수 없습니다.')
+    role=room['assignments'][pid]['role']
+    if role not in ('마피아','경찰','의사'):raise ValueError('현재 역할에는 밤 행동이 없습니다.')
+    if pid in gd.setdefault('mafia_actions',{}):raise ValueError('이미 밤 행동을 선택했습니다.')
+    if target not in alive or target==pid and role in ('마피아','경찰'):raise ValueError('다른 살아있는 참가자를 선택하세요.')
+    if role=='의사' and target==gd.get('doctor_last_target'):raise ValueError('의사는 같은 사람을 연속으로 보호할 수 없습니다.')
+    gd['mafia_actions'][pid]=target
+    required=[p for p in alive if room['assignments'][p]['role'] in ('마피아','경찰','의사')]
+    if all(p in gd['mafia_actions'] for p in required):resolve_mafia_night(room)
+
+def resolve_mafia_night(room):
+    gd=room['game_data'];actions=gd.get('mafia_actions',{});alive=mafia_alive(room);maf=[p for p in alive if room['assignments'][p]['role']=='마피아'];kills=[actions[p] for p in maf if p in actions]
+    kill=None
+    if kills:
+        c=Counter(kills);mx=max(c.values());kill=random.choice([p for p,v in c.items() if v==mx])
+    doctor=next((p for p in alive if room['assignments'][p]['role']=='의사'),None);saved=actions.get(doctor) if doctor else None
+    if doctor and saved:gd['doctor_last_target']=saved
+    police=next((p for p in alive if room['assignments'][p]['role']=='경찰'),None)
+    if police and police in actions:
+        t=actions[police];is_maf=room['assignments'][t]['role']=='마피아';append_private_notice(room,police,f'{room["players"][t]["name"]} 조사 결과: '+('마피아 반응' if is_maf else '마피아 반응 없음'))
+    if kill and kill!=saved:
+        room['players'][kill]['alive']=False;room['round_result']={'stage':'mafia_morning','title':'밤의 희생자','text':f'{room["players"][kill]["name"]}님이 밤에 제거되었습니다.'};room['public']['event_title']='아침';room['public']['event_text']=f'{room["players"][kill]["name"]}님이 밤에 제거되었습니다.'
+    else:
+        room['round_result']={'stage':'mafia_morning','title':'평온한 아침','text':'지난밤 아무도 제거되지 않았습니다.'};room['public']['event_title']='아침';room['public']['event_text']='지난밤 아무도 제거되지 않았습니다.'
+    if mafia_check_win(room):return
+    gd['mafia_stage']='morning';room['interaction_deadline']=now()+5;room['deadline']=room['interaction_deadline']
+
+def start_mafia_discuss(room):
+    gd=room['game_data'];gd['mafia_stage']='discuss';room['round_result']=None;sec=45 if len(mafia_alive(room))<=7 else 60;room['public']['event_title']=f'{gd["mafia_day"]}일차 낮';room['public']['event_text']='휴대폰을 내려놓고 서로 토론하세요.';room['interaction_deadline']=now()+sec;room['deadline']=room['interaction_deadline']
+
+def start_mafia_vote(room):
+    gd=room['game_data'];gd['mafia_stage']='vote';room['votes']={};room['public']['event_title']='최종 지목';room['public']['event_text']='살아있는 사람들은 마피아라고 생각하는 한 명에게 투표하세요.';room['interaction_deadline']=now()+25;room['deadline']=room['interaction_deadline']
+
+def mafia_vote(room,pid,target):
+    gd=room['game_data'];alive=mafia_alive(room)
+    if gd.get('mafia_stage')!='vote' or pid not in alive:raise ValueError('지금은 투표할 수 없습니다.')
+    if pid in room['votes']:raise ValueError('이미 투표했습니다.')
+    if target not in alive or target==pid:raise ValueError('다른 살아있는 참가자를 선택하세요.')
+    room['votes'][pid]=target
+    if len(room['votes'])>=len(alive):resolve_mafia_vote(room)
+
+def resolve_mafia_vote(room):
+    gd=room['game_data'];valid={p:t for p,t in room.get('votes',{}).items() if p in mafia_alive(room) and t in mafia_alive(room)}
+    if valid:
+        c=Counter(valid.values());mx=max(c.values());tops=[p for p,v in c.items() if v==mx]
+    else:tops=[]
+    if len(tops)==1:
+        out=tops[0];room['players'][out]['alive']=False;text=f'{room["players"][out]["name"]}님이 투표로 탈락했습니다. 역할은 {room["assignments"][out]["role"]}였습니다.'
+    elif len(tops)>1:text='최다 득표가 동률이라 아무도 탈락하지 않았습니다.'
+    else:text='유효한 투표가 없어 아무도 탈락하지 않았습니다.'
+    rows=[]
+    for voter,target in valid.items():rows.append({'player':room['players'][voter]['name'],'choice':room['players'][target]['name'],'correct':room['assignments'][target]['role']=='마피아'})
+    room['round_result']={'stage':'mafia_vote_result','title':'낮 투표 결과','text':text,'answers':rows};room['public']['event_title']='투표 결과';room['public']['event_text']=text
+    if mafia_check_win(room):return
+    gd['mafia_stage']='vote_result';room['interaction_deadline']=now()+6;room['deadline']=room['interaction_deadline']
+
+# ---------- wrappers ----------
+_V45_SETUP_GAME=setup_game
+def setup_game(room,replay=False):
+    gid=room.get('game_id')
+    if gid=='reaction':return setup_reaction(room)
+    if gid=='mafia':return setup_mafia(room)
+    return _V45_SETUP_GAME(room,replay)
+
+_V45_ENTER_PLAY=enter_play
+def enter_play(room):
+    gid=room.get('game_id')
+    if gid=='reaction':room['phase']='play';room['phase_started']=now();return start_reaction_round(room)
+    if gid=='mafia':room['phase']='play';room['phase_started']=now();return start_mafia_night(room)
+    return _V45_ENTER_PLAY(room)
+
+_V45_DO_ACTION=do_action
+def do_action(room,pid,data):
+    t=data.get('type')
+    if t=='reaction_tap':
+        if room.get('phase')!='play' or room.get('game_id')!='reaction' or room.get('paused'):raise ValueError('지금은 반응할 수 없습니다.')
+        return reaction_tap(room,pid)
+    if t=='mafia_night_action':
+        if room.get('phase')!='play' or room.get('game_id')!='mafia' or room.get('paused'):raise ValueError('지금은 밤 행동을 할 수 없습니다.')
+        return mafia_night_action(room,pid,data.get('target'))
+    if t=='mafia_vote':
+        if room.get('phase')!='play' or room.get('game_id')!='mafia' or room.get('paused'):raise ValueError('지금은 투표할 수 없습니다.')
+        return mafia_vote(room,pid,data.get('target'))
+    return _V45_DO_ACTION(room,pid,data)
+
+_V45_TICK=tick
+def tick(room):
+    _V45_TICK(room)
+    if room.get('phase')!='play' or room.get('paused'):return
+    gid=room.get('game_id');gd=room.get('game_data',{});ts=now()
+    if gid=='reaction':
+        st=gd.get('reaction_stage')
+        if st=='wait' and ts>=gd.get('reaction_cue_at',1e18):cue_reaction(room)
+        elif st=='cue' and ts>=gd.get('reaction_resolve_at',1e18):resolve_reaction(room)
+        elif st=='result' and ts>=room.get('interaction_deadline',1e18):next_reaction(room)
+    elif gid=='mafia':
+        st=gd.get('mafia_stage')
+        if st=='night' and ts>=room.get('interaction_deadline',1e18):resolve_mafia_night(room)
+        elif st=='morning' and ts>=room.get('interaction_deadline',1e18):start_mafia_discuss(room)
+        elif st=='discuss' and ts>=room.get('interaction_deadline',1e18):start_mafia_vote(room)
+        elif st=='vote' and ts>=room.get('interaction_deadline',1e18):resolve_mafia_vote(room)
+        elif st=='vote_result' and ts>=room.get('interaction_deadline',1e18):gd['mafia_day']+=1;start_mafia_night(room)
+
+_V45_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V45_PUBLIC_GAME_DATA(room,pid);gd=room.get('game_data',{});gid=room.get('game_id')
+    if gid=='reaction':out.update({'reaction_stage':gd.get('reaction_stage'),'reaction_index':gd.get('reaction_index',0)+1,'reaction_total':gd.get('reaction_total',8),'reaction_mode':gd.get('reaction_mode') if gd.get('reaction_stage') in ('cue','result') else None,'reaction_false':pid in gd.get('reaction_false',{}),'my_submitted':pid in room.get('submissions',{})})
+    if gid=='mafia':out.update({'mafia_stage':gd.get('mafia_stage'),'mafia_day':gd.get('mafia_day',1),'my_action':pid in gd.get('mafia_actions',{}),'my_vote':pid in room.get('votes',{}),'alive_count':len(mafia_alive(room))})
+    return out
+
+_V45_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V45_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5';return out
+
+_V45_GET=Handler.do_GET
+def _v45_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5'})
+    return _V45_GET(self)
+Handler.do_GET=_v45_do_get
