@@ -1,0 +1,100 @@
+   <div class="card half"><div class="title">참가자 <span id="pcnt"></span></div><div id="plist" class="players" style="margin-top:10px"></div><div class="divider"></div><div class="notice">회원가입 없음 · 새로고침해도 자동 복귀 · 방장은 게임 중에도 일반 플레이 화면을 사용합니다.</div></div>
+   <div id="hostSettings" class="card hidden">
+    <div class="title">게임 기본 설정</div>
+    <div class="sub">기본값 그대로 시작해도 됩니다. 필요할 때만 바꾸세요.</div>
+    <div class="settingsGrid" style="margin-top:12px">
+      <div><div class="label">진행 속도</div><select id="tempo" onchange="saveSettings()"><option value="fast">빠르게</option><option value="brisk">기본 · 템포 있게</option><option value="relaxed">여유 있게</option></select></div>
+      <div><div class="label">질문 강도</div><select id="spice" onchange="saveSettings()"><option value="mild">순한맛</option><option value="spicy">매운맛</option><option value="hot">아주 친한 사이</option></select></div>
+    </div>
+    <details><summary>세부 필터</summary>
+      <div class="toggleline"><span class="sub">신체 접촉 미션 제외</span><label class="switch"><input id="touch" type="checkbox" onchange="saveSettings()"><span class="slider"></span></label></div>
+      <div class="toggleline"><span class="sub">술 관련 미션 제외</span><label class="switch"><input id="drink" type="checkbox" onchange="saveSettings()"><span class="slider"></span></label></div>
+      <div class="toggleline"><span class="sub">연애 관련 질문 제외</span><label class="switch"><input id="dating" type="checkbox" onchange="saveSettings()"><span class="slider"></span></label></div>
+      <div class="toggleline"><span class="sub">상대 성공 확인 사용</span><label class="switch"><input id="verify" type="checkbox" onchange="saveSettings()"><span class="slider"></span></label></div>
+    </details>
+   </div>
+  </div>
+  <div class="bottom"><div class="inner"><button class="btn ghost" onclick="leaveRoom()">나가기</button><button id="displayBtn" class="btn ghost hidden" onclick="openDisplay()">공용 화면</button><button id="chooseBtn" class="btn primary hidden" onclick="act('open_games')">게임 고르기</button></div></div>
+ </section>
+
+ <section id="games" class="view">
+   <div class="hero" style="padding-top:8px"><div class="eyebrow">CHOOSE THE MOOD</div><h1 style="font-size:37px">지금 분위기에 맞게.</h1><p>빠른 게임은 바로 웃기고, 메인 게임은 뒤로 갈수록 몰입됩니다.</p></div>
+   <div id="gamesGrid" class="gamegrid"></div>
+   <div class="bottom"><div class="inner"><button class="btn ghost" onclick="act('back_lobby')">로비</button><button class="btn secondary" onclick="showToday()">오늘 기록</button></div></div>
+ </section>
+
+ <section id="guide" class="view">
+   <div class="guideHero"><div id="gCat" class="eyebrow"></div><div id="gTitle" class="name"></div><div id="gMeta" class="sub"></div></div>
+   <div id="gDesc" class="quickRule"></div>
+   <div id="storyBox" class="notice info hidden" style="margin-top:10px"></div>
+   <details open><summary>30초 규칙</summary><div id="gSteps" class="steps" style="margin-top:9px"></div></details>
+   <div class="notice" style="margin-top:11px"><b>플레이 팁</b><br>게임 중에는 화면을 계속 볼 필요 없습니다. 진동이나 소리가 오면 확인하고, 다시 사람을 보세요.</div>
+   <div class="bottom"><div class="inner"><button id="guideBack" class="btn ghost" onclick="act('open_games')">다른 게임</button><button id="startBtn" class="btn primary" onclick="act('start')">시작</button></div></div>
+ </section>
+
+ <section id="countdown" class="view">
+   <div class="countWrap"><div class="eyebrow">PRIVATE INFO READY</div><div id="countNum" class="countdown">5</div><div class="sub">역할과 미션은 자기 화면만 확인하세요.</div></div>
+ </section>
+
+ <section id="play" class="view">
+   <div class="playHead"><div><div id="playTitle" class="gameTiny"></div><div id="roundText" class="sub"></div></div><div id="timer" class="timerTiny">00:00</div></div>
+   <div id="interactionBar" class="interaction hidden"><div id="interactionFill"></div></div>
+   <div id="pendingBox" class="confirmBox hidden"><div class="title">확인 요청</div><div id="pendingText" class="sub" style="margin:6px 0 10px"></div><div class="row"><button class="btn primary" onclick="confirmPending(true)">맞아요</button><button class="btn ghost" onclick="confirmPending(false)">아니에요</button></div><div class="sub" style="margin-top:7px">응답이 없으면 15초 후 자동 승인됩니다.</div></div>
+
+   <div class="nowCard">
+      <div class="nowLabel">NOW · 지금 할 일</div>
+      <div class="roleLine"><span id="role" class="role"></span><span id="targetLine" class="target"></span></div>
+      <div id="mission" class="mission"></div>
+      <div id="privateNotice" class="privateNotice hidden"></div>
+      <div id="waitingInfo" class="waiting hidden"></div>
+      <div id="privateActions" class="actionBox"></div>
+      <div id="minorActions" class="minorActions"></div>
+   </div>
+
+   <div class="eventTicker"><b id="eventTitle">SYSTEM</b><div id="eventText"></div></div>
+   <div id="roundResultBox" class="roundResult hidden"><div id="roundResult"></div></div>
+
+   <details><summary>점수 / 전체 상황</summary><div id="stats" class="score" style="margin-top:8px"></div></details>
+   <details><summary>내 역할·미션 다시 확인</summary><div class="notice" style="margin-top:8px">위의 NOW 카드가 현재 기준 정보입니다. 미션이 현실적으로 어렵거나 불편하면 한 판에 한 번 무료 교체할 수 있습니다.</div></details>
+   <details id="hostControls" class="hidden"><summary>방 관리</summary><div class="row" style="margin-top:8px"><button id="pauseBtn" class="btn secondary" onclick="act('pause')">일시정지</button><button class="btn ghost" onclick="act('event')">사건 발생</button><button id="nextRoundBtn" class="btn ghost hidden" onclick="act('next_round')">다음 라운드</button><button id="nightFinish" class="btn ghost hidden" onclick="act('finish_night_vote')">최종 투표 마감</button><button class="btn danger" onclick="act('end')">게임 종료</button></div></details>
+ </section>
+
+ <section id="result" class="view">
+   <div class="card center"><div class="eyebrow">RESULT</div><div id="winner" style="font-size:35px;font-weight:1000;margin:7px 0"></div><div id="resultTitle" class="sub"></div><div class="divider"></div><div id="resultScores" class="score"></div></div>
+   <div class="card" style="margin-top:10px"><div class="title">다음 게임까지 2번 터치 이내</div><div class="sub">방과 참가자는 그대로 유지됩니다.</div><div class="row" style="margin-top:11px"><button id="replayBtn" class="btn primary" onclick="act('replay')">한 판 더</button><button id="otherBtn" class="btn secondary" onclick="act('open_games')">다른 게임</button><button class="btn ghost" onclick="showToday()">오늘 기록</button></div></div>
+ </section>
+
+ <section id="today" class="view">
+   <div class="card"><div class="eyebrow">TODAY</div><div class="title" style="font-size:28px">오늘 밤 기록</div><div id="todayText" class="notice" style="margin-top:11px"></div><div class="divider"></div><div id="todayScores" class="score"></div></div>
+   <div class="bottom"><div class="inner"><button class="btn secondary" onclick="goCurrent()">돌아가기</button></div></div>
+ </section>
+
+ <section id="display" class="view">
+   <div class="displayHero"><div class="eyebrow">PUBLIC DISPLAY · 비밀정보 없음</div><h1 id="dTitle">밤놀자</h1><div id="dSub" class="sub"></div></div>
+   <div class="grid"><div class="card half center"><div class="label">ROOM</div><div id="dRoom" class="code"></div><div id="dTimer" class="bigPublicTimer">--:--</div></div><div class="card half"><div class="title">현재 점수</div><div id="dScores" class="score" style="margin-top:10px"></div></div><div class="card"><div class="eyebrow" id="dEventTitle">SYSTEM</div><div id="dEventText" style="font-size:22px;font-weight:850;line-height:1.4;margin-top:8px"></div></div></div>
+ </section>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+let S=null,polling=null,pendingId=null,wakeLock=null,lastStateAt=Date.now(),returnView=null;
+const qp=new URLSearchParams(location.search),displayMode=qp.get('display')==='1',displayRoom=(qp.get('room')||'').toUpperCase(),$=id=>document.getElementById(id);
+const saved=()=>{try{return JSON.parse(localStorage.getItem('bamnolja_me')||'null')}catch{return null}};
+const AUDIO_PREF_KEY='bamnolja_audio';let audioCtx=null,audioEnabled=false,bgTimer=null,bgStep=0,lastCountdownSecond=null,lastBombTick=null,lastWarningSecond=null;
+
+function audioPrefs(){try{return Object.assign({sfx:true,music:true,vibe:true},JSON.parse(localStorage.getItem(AUDIO_PREF_KEY)||'{}'))}catch{return {sfx:true,music:true,vibe:true}}}
+async function enableSound(){try{audioCtx=audioCtx||new(window.AudioContext||window.webkitAudioContext)();await audioCtx.resume();audioEnabled=true;sfx('unlock');syncBackground();$('soundUnlock').textContent='소리 ON';toast('게임 소리 활성화')}catch{toast('소리를 켤 수 없는 브라우저입니다.')}}
+function toggleSound(){if(audioEnabled){audioEnabled=false;stopBackground();$('soundUnlock').textContent='소리 OFF';toast('게임 소리 끔')}else enableSound()}
+function tone(freq=440,dur=.12,type='sine',gain=.055,delay=0,slideTo=null){if(!audioEnabled||!audioCtx||!audioPrefs().sfx)return;let t=audioCtx.currentTime+delay,o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type;o.frequency.setValueAtTime(freq,t);if(slideTo)o.frequency.exponentialRampToValueAtTime(Math.max(20,slideTo),t+dur);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(Math.max(.001,gain),t+.01);g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.connect(g).connect(audioCtx.destination);o.start(t);o.stop(t+dur+.03)}
+function noise(dur=.15,gain=.028,delay=0){if(!audioEnabled||!audioCtx||!audioPrefs().sfx)return;let len=Math.floor(audioCtx.sampleRate*dur),buf=audioCtx.createBuffer(1,len,audioCtx.sampleRate),d=buf.getChannelData(0);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*(1-i/len);let src=audioCtx.createBufferSource(),g=audioCtx.createGain(),t=audioCtx.currentTime+delay;src.buffer=buf;g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.0001,t+dur);src.connect(g).connect(audioCtx.destination);src.start(t);src.stop(t+dur+.02)}
+function sfx(n){if(!audioEnabled)return;switch(n){case'unlock':tone(520,.07);tone(760,.11,'sine',.05,.07);break;case'count':tone(480,.055,'square',.03);break;case'start':tone(420,.07);tone(630,.08,'sine',.05,.08);tone(840,.16,'sine',.06,.16);break;case'event':tone(180,.13,'sawtooth',.035,0,115);noise(.10,.018,.03);break;case'success':tone(500,.07);tone(720,.12,'sine',.05,.08);break;case'fail':tone(220,.10,'square',.035);tone(165,.15,'square',.035,.10);break;case'pending':tone(700,.06);tone(700,.06,'sine',.04,.11);break;case'infect':tone(125,.22,'sawtooth',.04,0,70);break;case'bombpass':tone(300,.07,'square',.035);tone(180,.12,'square',.04,.08);break;case'reveal':tone(260,.13);tone(390,.13,'sine',.04,.13);tone(585,.20,'sine',.05,.26);break;case'victory':tone(392,.11);tone(523,.11,'sine',.045,.11);tone(659,.18,'sine',.055,.22);break;case'warning':tone(820,.055,'square',.032);break;}}
+function vibrate(p){if(!audioPrefs().vibe)return;try{navigator.vibrate?.(p)}catch{}}
+function bgTone(freq,dur=.7,g=.009,type='sine'){if(!audioEnabled||!audioCtx||!audioPrefs().music)return;let t=audioCtx.currentTime,o=audioCtx.createOscillator(),gn=audioCtx.createGain();o.type=type;o.frequency.setValueAtTime(freq,t);gn.gain.setValueAtTime(.0001,t);gn.gain.linearRampToValueAtTime(g,t+.12);gn.gain.linearRampToValueAtTime(.0001,t+dur);o.connect(gn).connect(audioCtx.destination);o.start(t);o.stop(t+dur+.02)}
+function stopBackground(){if(bgTimer){clearInterval(bgTimer);bgTimer=null}}
+function syncBackground(){stopBackground();if(!audioEnabled||!S||S.phase!=='play')return;bgStep=0;let gid=S.game_id;bgTimer=setInterval(()=>{if(!S||S.phase!=='play'||S.paused)return;bgStep++;if(gid==='night'){bgTone(bgStep%2?72:86,1.6,.011);if(bgStep%3===0)bgTone(145,.7,.005,'triangle')}else if(gid==='infection'){bgTone(bgStep%2?92:110,.55,.008,'sawtooth')}else if(gid==='bounty'||gid==='betray'){bgTone(bgStep%2?118:132,.35,.006,'triangle')}else if(gid!=='bomb'&&bgStep%2===0)bgTone(165,.3,.004)},gid==='night'?1700:1000)}
+function snapshot(x){return x?{phase:x.phase,event:x.public?.event_title,text:x.public?.event_text,pending:x.pending?.length||0,role:x.assignment?.role,mission:x.assignment?.mission,result:x.result?.winner,round:x.round_no,paused:x.paused}:null}
+function handleAudio(oldS,newS){let a=snapshot(oldS),b=snapshot(newS);if(!b)return;if(!a){syncBackground();return}if(a.phase!==b.phase){if(b.phase==='countdown'){lastCountdownSecond=null;stopBackground()}if(b.phase==='play'){sfx('start');vibrate([90,40,150]);syncBackground()}if(b.phase==='result'){stopBackground();sfx('victory');vibrate([100,50,160])}}if((a.event!==b.event||a.text!==b.text)&&b.phase==='play'){let t=(b.event||'')+' '+(b.text||'');if(/감염/.test(t)){sfx('infect');vibrate([130,40,130])}else if(/폭탄 이동/.test(t)){sfx('bombpass');vibrate([60,30,70])}else if(/반려|실패/.test(t)){sfx('fail');vibrate(130)}else if(/성공|적발|자동 확인/.test(t)){sfx('success');vibrate([45,25,70])}else if(/정체|정답|결과|FINAL/.test(t)){sfx('reveal');vibrate([70,35,70])}else{sfx('event');vibrate(65)}}if(b.pending>a.pending){sfx('pending');vibrate([55,35,55])}if(a.role!==b.role||a.mission!==b.mission){sfx('warning');vibrate(75)}if(a.paused!==b.paused){b.paused?stopBackground():syncBackground()}}
+function audioHeartbeat(){if(!S||S.phase!=='play'||S.paused)return;let rem=Math.ceil(localRemaining('remaining'));if(S.game_id==='bomb'&&audioEnabled){let interval=rem<=30?.5:rem<=60?1:2,slot=Math.floor(Date.now()/1000/interval);if(slot!==lastBombTick){lastBombTick=slot;tone(rem<=30?720:rem<=60?570:430,.04,'square',rem<=30?.04:.022);if(rem<=10)vibrate(20)}}let ir=Math.ceil(localRemaining('interaction_remaining'));if(ir>0&&ir<=5&&ir!==lastWarningSecond){lastWarningSecond=ir;sfx('warning')}}
+setInterval(audioHeartbeat,220);
+
+function setSaved(room,pid,token){localStorage.setItem('bamnolja_me',JSON.stringify({room,pid,token}))}
