@@ -1,0 +1,210 @@
+# v4.2: trivia battle, normalized party points, configurable penalties, choice reveals
+from quiz_pack_v42 import QUIZ_QUESTIONS, QUIZ_CATEGORIES
+
+GAMES['quiz']={
+    'rank':11,'emoji':'🧠','title':'상식 배틀','cat':'퀴즈/스피드','players':'2~15명','time':'5~15분','duration':15*60,
+    'desc':'역사·인물·동물·과학 등 원하는 분야를 골라 모두 동시에 푸는 실시간 상식 대결.',
+    'guide':['카테고리와 난이도, 문제 수를 고릅니다.','모두 같은 4지선다 문제를 제한시간 안에 선택합니다.','정답은 +2점, 가장 빠른 정답자는 보너스 +1점입니다.','매 문제 뒤 누가 어떤 답을 골랐는지 함께 공개됩니다.']
+}
+
+DEFAULT_PENALTIES=['다음 간식 가져오기','단체사진 포즈 정하기','다음 게임 별명으로 플레이하기','테이블 정리 담당','물이나 음료 가져오기','다음 게임 시작 멘트 담당']
+
+def ensure_v42_room(room):
+    s=room.setdefault('settings',{})
+    s.setdefault('quiz_categories',list(QUIZ_CATEGORIES));s.setdefault('quiz_diff','all');s.setdefault('quiz_count',10);s.setdefault('quiz_seconds',8)
+    s.setdefault('penalty_mode','off');s.setdefault('penalty_target','last1');s.setdefault('penalty_source','default');s.setdefault('custom_penalties',[])
+    for p in room.get('players',{}).values():p.setdefault('party_points',0)
+    room.setdefault('penalty_reveal',None)
+    return room
+
+_V42_OLD_ADD_PLAYER=add_player
+def add_player(room,pid,name,host=False,token=None):
+    _V42_OLD_ADD_PLAYER(room,pid,name,host,token);room['players'][pid].setdefault('party_points',0)
+
+
+def quiz_pool(room):
+    s=room['settings'];cats=set(s.get('quiz_categories') or QUIZ_CATEGORIES);diff=s.get('quiz_diff','all')
+    pool=[q for q in QUIZ_QUESTIONS if q['cat'] in cats and (diff=='all' or q['diff']==diff)]
+    if not pool:pool=list(QUIZ_QUESTIONS)
+    used=room.setdefault('used',{}).setdefault('quiz_questions',[]);fresh=[q for q in pool if q['q'] not in used]
+    if len(fresh)<min(len(pool),int(s.get('quiz_count',10))):fresh=pool
+    random.shuffle(fresh);return fresh
+
+def prepare_quiz(room):
+    ensure_v42_room(room);count=max(5,min(20,int(room['settings'].get('quiz_count',10))));pool=quiz_pool(room);questions=[]
+    for q in pool[:min(count,len(pool))]:
+        item=dict(q);opts=list(q['options']);random.shuffle(opts);item['options']=opts;questions.append(item);room['used'].setdefault('quiz_questions',[]).append(q['q'])
+    room['used']['quiz_questions']=room['used']['quiz_questions'][-120:]
+    room['game_data']={'start_scores':{p:room['players'][p]['score'] for p in active_pids(room)},'quiz_questions':questions,'quiz_index':0,'quiz_stage':'ready','quiz_total':len(questions),'quiz_correct_count':{},'quiz_fast_count':{}}
+    room['assignments']={};room['pending']={};room['submissions']={};room['votes']={};room['round_result']=None;room['round_no']=1
+    room['public']={'event_title':'상식 배틀 준비','event_text':'문제를 확인하면 바로 선택하세요. 정답 공개 때 모두의 선택도 함께 공개됩니다.','story':None,'special':None}
+    room['phase']='countdown';room['phase_started']=now();room['deadline']=now()+5;room['interaction_deadline']=None;room['paused']=False;room['pause_remaining']=None;room['paused_at']=None
+
+def setup_quiz_question(room):
+    gd=room['game_data'];idx=int(gd.get('quiz_index',0));qs=gd.get('quiz_questions',[])
+    if idx>=len(qs):finish_game(room);return
+    q=qs[idx];room['submissions']={};room['round_result']=None;room['round_no']=idx+1;gd['quiz_stage']='answer'
+    sec=max(5,min(15,int(room['settings'].get('quiz_seconds',8))));gd['interaction_total']=sec
+    for pid in active_pids(room):make_assignment(room,pid,'상식 배틀',q['q'],None,{'options':q['options'],'category':q['cat'],'difficulty':q['diff'],'question_no':idx+1,'total':len(qs)})
+    room['public']['event_title']=f'{q["cat"]} · {idx+1}/{len(qs)}';room['public']['event_text']='정답이라고 생각하는 보기를 고르세요.'
+    room['interaction_deadline']=now()+sec;room['deadline']=room['interaction_deadline']
+
+def start_quiz_play(room):
+    room['phase']='play';room['phase_started']=now();setup_quiz_question(room)
+
+def resolve_quiz(room):
+    gd=room['game_data']
+    if gd.get('quiz_stage')!='answer':return
+    idx=gd['quiz_index'];qs=gd['quiz_questions']
+    if idx>=len(qs):return
+    q=qs[idx];subs=room.get('submissions',{});correct=[]
+    for pid,v in subs.items():
+        if pid in active_pids(room) and v.get('choice')==q['answer']:correct.append((float(v.get('ts',now())),pid))
+    correct.sort();fast=correct[0][1] if correct else None
+    answers=[]
+    for pid in active_pids(room):
+        v=subs.get(pid);choice=v.get('choice') if v else None;ok=choice==q['answer']
+        if ok:
+            score(room,pid,2);gd['quiz_correct_count'][pid]=gd['quiz_correct_count'].get(pid,0)+1
+            if pid==fast:score(room,pid,1);gd['quiz_fast_count'][pid]=gd['quiz_fast_count'].get(pid,0)+1
+        answers.append({'player':room['players'][pid]['name'],'choice':choice or '미응답','correct':ok,'fastest':pid==fast})
+    room['round_result']={'stage':'quiz_result','correct_answer':q['answer'],'explanation':q['explanation'],'answers':answers,'category':q['cat'],'question':q['q']}
+    room['public']['event_title']='정답 공개';room['public']['event_text']=f'정답은 {q["answer"]} · 누가 어떤 보기를 골랐는지 확인하세요.'
+    gd['quiz_stage']='result';gd['interaction_total']=5;room['interaction_deadline']=now()+5;room['deadline']=room['interaction_deadline']
+
+def next_quiz_question(room):
+    gd=room['game_data'];gd['quiz_index']=int(gd.get('quiz_index',0))+1
+    if gd['quiz_index']>=len(gd.get('quiz_questions',[])):finish_game(room)
+    else:setup_quiz_question(room)
+
+_V42_OLD_SETUP_GAME=setup_game
+def setup_game(room,replay=False):
+    ensure_v42_room(room);room['penalty_reveal']=None
+    if room.get('game_id')=='quiz':return prepare_quiz(room)
+    return _V42_OLD_SETUP_GAME(room,replay)
+
+_V42_OLD_TICK=tick
+def tick(room):
+    ensure_v42_room(room)
+    if room.get('game_id')!='quiz':return _V42_OLD_TICK(room)
+    if room['phase']=='countdown' and room.get('deadline') and now()>=room['deadline']:start_quiz_play(room);return
+    if room['phase']=='play' and not room.get('paused') and room.get('interaction_deadline') and now()>=room['interaction_deadline']:
+        if room['game_data'].get('quiz_stage')=='answer':resolve_quiz(room)
+        elif room['game_data'].get('quiz_stage')=='result':next_quiz_question(room)
+
+_V42_OLD_HANDLE_SUBMIT=handle_submit
+def handle_submit(room,pid,data):
+    if room.get('game_id')!='quiz':return _V42_OLD_HANDLE_SUBMIT(room,pid,data)
+    if room.get('game_data',{}).get('quiz_stage')!='answer':raise ValueError('지금은 답을 제출할 수 없습니다.')
+    if pid in room.get('submissions',{}):raise ValueError('이미 답을 선택했습니다.')
+    q=room['game_data']['quiz_questions'][room['game_data']['quiz_index']];choice=str(data.get('choice',''))
+    if choice not in q['options']:raise ValueError('보기 중 하나를 선택해 주세요.')
+    room['submissions'][pid]={'choice':choice,'ts':now()}
+    if len([p for p in room['submissions'] if p in active_pids(room)])>=len(active_pids(room)):resolve_quiz(room)
+
+_V42_OLD_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V42_OLD_PUBLIC_GAME_DATA(room,pid)
+    if room.get('game_id')=='quiz':
+        gd=room.get('game_data',{});out.update({'submitted':len([p for p in room.get('submissions',{}) if p in active_pids(room)]),'needed':len(active_pids(room)),'my_submitted':pid in room.get('submissions',{}),'interaction_total':gd.get('interaction_total',0),'quiz_index':gd.get('quiz_index',0)+1,'quiz_total':gd.get('quiz_total',0),'quiz_stage':gd.get('quiz_stage')})
+    return out
+
+
+def party_point_awards(room,game_points):
+    pids=active_pids(room);n=len(pids);awards={}
+    for pid in pids:
+        greater=sum(1 for other in pids if game_points.get(other,0)>game_points.get(pid,0));awards[pid]=8 if n<=1 else round(8*(n-1-greater)/(n-1))
+    return awards
+
+
+def choose_penalty_targets(room,game_points=None):
+    pids=active_pids(room)
+    if not pids:return []
+    if game_points is None:key=lambda p:room['players'][p].get('party_points',0)
+    else:key=lambda p:game_points.get(p,0)
+    ordered=sorted(pids,key=lambda p:(key(p),room['players'][p]['name']))
+    rule=room['settings'].get('penalty_target','last1')
+    if rule=='bottom2':return ordered[:min(2,len(ordered))]
+    if rule=='random_bottom3':return [random.choice(ordered[:min(3,len(ordered))])]
+    return ordered[:1]
+
+def choose_penalty_text(room):
+    s=room['settings'];custom=[str(x).strip()[:60] for x in s.get('custom_penalties',[]) if str(x).strip()];source=s.get('penalty_source','default')
+    pool=custom if source=='custom' else DEFAULT_PENALTIES+custom if source=='mixed' else DEFAULT_PENALTIES
+    return random.choice(pool or DEFAULT_PENALTIES)
+
+def reveal_penalty(room,game_points=None,kind='final'):
+    targets=choose_penalty_targets(room,game_points);room['penalty_reveal']={'kind':kind,'targets':[room['players'][p]['name'] for p in targets],'target_ids':targets,'text':choose_penalty_text(room),'at':now()};return room['penalty_reveal']
+
+_V42_OLD_FINISH_GAME=finish_game
+def finish_game(room):
+    ensure_v42_room(room)
+    if room.get('phase')=='result':return
+    before=len(room.get('history',[]));_V42_OLD_FINISH_GAME(room)
+    if len(room.get('history',[]))<=before:return
+    hist=room['history'][-1];gp=hist.get('game_points',{});awards=party_point_awards(room,gp);hist['party_points']=awards
+    for pid,pts in awards.items():room['players'][pid]['party_points']=room['players'][pid].get('party_points',0)+pts
+    if room.get('result') is not None:room['result']['party_points']=awards
+    if room['settings'].get('penalty_mode')=='per_game':reveal_penalty(room,gp,'game')
+
+
+def compute_today(room):
+    ensure_v42_room(room);ps=[p for p in room['players'].values() if p.get('active')]
+    if not ps:return {}
+    leader=max(ps,key=lambda p:p.get('party_points',0));hunter=max(ps,key=lambda p:p['metrics'].get('eliminations',0));missions=max(ps,key=lambda p:p['metrics'].get('missions',0));betrayer=max(ps,key=lambda p:p['metrics'].get('betrayals',0))
+    return {'games':len(room['history']),'leader':leader['name'],'leader_score':leader.get('party_points',0),'hunter':hunter['name'],'hunter_n':hunter['metrics'].get('eliminations',0),'missions':missions['name'],'missions_n':missions['metrics'].get('missions',0),'betrayer':betrayer['name'],'betrayals':betrayer['metrics'].get('betrayals',0)}
+
+_V42_OLD_DO_ACTION=do_action
+def do_action(room,pid,data):
+    ensure_v42_room(room);t=data.get('type');is_host=pid==room.get('host_pid')
+    if t=='settings':
+        if is_host and room.get('phase') not in ('countdown','play'):
+            s=room['settings']
+            if 'quiz_categories' in data:
+                cats=[c for c in data.get('quiz_categories',[]) if c in QUIZ_CATEGORIES];s['quiz_categories']=cats or list(QUIZ_CATEGORIES)
+            if data.get('quiz_diff') in ('all','easy','normal','hard'):s['quiz_diff']=data['quiz_diff']
+            if str(data.get('quiz_count','')).isdigit():s['quiz_count']=max(5,min(20,int(data['quiz_count'])))
+            if str(data.get('quiz_seconds','')).isdigit():s['quiz_seconds']=max(5,min(15,int(data['quiz_seconds'])))
+            if data.get('penalty_mode') in ('off','final','per_game'):
+                s['penalty_mode']=data['penalty_mode']
+                if data['penalty_mode']=='off':room['penalty_reveal']=None
+            if data.get('penalty_target') in ('last1','bottom2','random_bottom3'):s['penalty_target']=data['penalty_target']
+            if data.get('penalty_source') in ('default','custom','mixed'):s['penalty_source']=data['penalty_source']
+            if 'custom_penalties' in data:s['custom_penalties']=[str(x).strip()[:60] for x in list(data.get('custom_penalties') or [])[:12] if str(x).strip()]
+        return _V42_OLD_DO_ACTION(room,pid,data)
+    if t=='reveal_penalty':
+        if not is_host:raise ValueError('방장만 오늘의 벌칙을 공개할 수 있습니다.')
+        if room['settings'].get('penalty_mode')=='off':raise ValueError('벌칙 모드가 꺼져 있습니다.')
+        reveal_penalty(room,None,'final');return
+    return _V42_OLD_DO_ACTION(room,pid,data)
+
+_V42_OLD_RESOLVE_CHOICE=resolve_choice
+def resolve_choice(room):
+    subs=dict(room.get('submissions',{}));c=dict(room.get('game_data',{}).get('choice') or {});_V42_OLD_RESOLVE_CHOICE(room)
+    if room.get('round_result') is not None:room['round_result']['selections']=[{'player':room['players'][p]['name'],'choice':c.get('a') if v.get('choice')=='a' else c.get('b')} for p,v in subs.items() if p in room['players']]
+
+_V42_OLD_RESOLVE_ODD_GUESS=resolve_odd_guess
+def resolve_odd_guess(room):
+    votes=dict(room.get('votes',{}));odd=room.get('game_data',{}).get('odd');_V42_OLD_RESOLVE_ODD_GUESS(room)
+    if room.get('round_result') is not None:room['round_result']['guesses']=[{'player':room['players'][p]['name'],'choice':room['players'][target]['name'],'correct':target==odd} for p,target in votes.items() if p in room['players'] and target in room['players']]
+
+_V42_OLD_RESOLVE_NIGHT=resolve_night_vote
+def resolve_night_vote(room):
+    votes=dict(room.get('votes',{}));_V42_OLD_RESOLVE_NIGHT(room)
+    if room.get('round_result') is not None:room['round_result']['votes']=[{'player':room['players'][p]['name'],'choice':room['players'][target]['name']} for p,target in votes.items() if p in room['players'] and target in room['players']]
+
+_V42_OLD_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    ensure_v42_room(room);out=_V42_OLD_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.2';out['penalty']=room.get('penalty_reveal')
+    byid={p['id']:p for p in out.get('players',[])}
+    for rid,p in room.get('players',{}).items():
+        if rid in byid:byid[rid]['party_points']=p.get('party_points',0)
+    if out.get('me') and pid in room.get('players',{}):out['me']['party_points']=room['players'][pid].get('party_points',0)
+    if out.get('result') is not None:out['result']['party_points']=(room.get('result') or {}).get('party_points',{})
+    return out
+
+_V42_OLD_GET=Handler.do_GET
+def _v42_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.2'})
+    return _V42_OLD_GET(self)
+Handler.do_GET=_v42_do_get
