@@ -1,0 +1,44 @@
+# v4.5.1: reaction/mafia own their staged timers instead of falling through to generic game deadline finish.
+_V451_TICK=tick
+def tick(room):
+    gid=room.get('game_id')
+    if gid not in ('reaction','mafia'):
+        return _V451_TICK(room)
+    # Countdown may safely use the generic path because the latest enter_play()
+    # dispatches into the staged game setup.
+    if room.get('phase')=='countdown':
+        return _V451_TICK(room)
+    if room.get('phase')!='play' or room.get('paused'):
+        return
+    ts=now();gd=room.get('game_data',{})
+    expire_pending(room)
+    if gid=='reaction':
+        st=gd.get('reaction_stage')
+        if st=='wait' and ts>=gd.get('reaction_cue_at',1e18):
+            cue_reaction(room)
+        elif st=='cue' and ts>=gd.get('reaction_resolve_at',1e18):
+            resolve_reaction(room)
+        elif st=='result' and ts>=room.get('interaction_deadline',1e18):
+            next_reaction(room)
+        return
+    st=gd.get('mafia_stage')
+    if st=='night' and ts>=room.get('interaction_deadline',1e18):
+        resolve_mafia_night(room)
+    elif st=='morning' and ts>=room.get('interaction_deadline',1e18):
+        start_mafia_discuss(room)
+    elif st=='discuss' and ts>=room.get('interaction_deadline',1e18):
+        start_mafia_vote(room)
+    elif st=='vote' and ts>=room.get('interaction_deadline',1e18):
+        resolve_mafia_vote(room)
+    elif st=='vote_result' and ts>=room.get('interaction_deadline',1e18):
+        gd['mafia_day']+=1;start_mafia_night(room)
+
+_V451_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V451_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.1';return out
+
+_V451_GET=Handler.do_GET
+def _v451_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.1'})
+    return _V451_GET(self)
+Handler.do_GET=_v451_do_get
