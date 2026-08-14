@@ -1,0 +1,224 @@
+# v4.3: enhanced small-group games + team sync
+from collections import Counter
+from mini_games_v43 import MATCH_PROMPTS, CHOSUNG_PROMPTS
+
+SMALL_GAMES=('match','number','bluff','chosung','teamsync')
+GAMES.update({
+'match':{'rank':12,'emoji':'💞','title':'마음 맞추기','cat':'취향/싱크','players':'2~8명','time':'5~10분','duration':10*60,'desc':'같은 질문에 몰래 A/B를 고르고 친구들과 얼마나 통하는지 확인하는 취향 게임.','guide':['모두 같은 양자택일 질문을 받습니다.','선택은 동시에 공개됩니다.','2명은 둘이 같으면 +2점, 3명 이상은 만장일치 +2점·다수파 +1점입니다.','누가 무엇을 골랐는지가 매 라운드 공개됩니다.']},
+'number':{'rank':13,'emoji':'🔢','title':'눈치 숫자','cat':'심리/숫자','players':'2~8명','time':'5~10분','duration':10*60,'desc':'1~9 중 숫자 하나를 몰래 고르고 매 라운드 바뀌는 규칙으로 서로의 선택을 읽는 심리전.','guide':['1~9 중 숫자를 하나 선택합니다.','낮은 유일수·높은 유일수·평균 80%·짝 찾기·중앙값 등 규칙이 매번 바뀝니다.','모두 고르면 숫자를 동시에 공개합니다.','직전 승리 숫자가 다음 라운드에 금지될 수도 있습니다.']},
+'bluff':{'rank':14,'emoji':'🎭','title':'블러프','cat':'거짓말/간파','players':'2~6명','time':'8~15분','duration':15*60,'desc':'한 명만 비밀 숫자를 보고 주장 카드를 골라 다른 사람을 속이는 빠른 심리전.','guide':['매 라운드 한 명이 블러퍼가 되어 비밀 숫자 1~9를 봅니다.','블러퍼는 여러 주장 카드 중 하나를 골라 공개합니다.','다른 사람들은 그 주장이 진실인지 거짓인지 투표합니다.','간파자는 +2점, 블러퍼는 속인 사람마다 +1점입니다.']},
+'chosung':{'rank':15,'emoji':'⚡','title':'초성 스피드','cat':'단어/순발력','players':'2~8명','time':'5~12분','duration':12*60,'desc':'초성과 카테고리를 보고 답을 빠르게 입력하는 단어 배틀. 힌트 전에 맞히면 더 높은 점수를 얻습니다.','guide':['초성과 카테고리만 먼저 공개됩니다.','일정 시간이 지나면 힌트가 공개되지만 받을 수 있는 점수가 줄어듭니다.','정답자는 빠른 순서대로 보너스를 얻습니다.','라운드 종료 후 친구들의 오답도 함께 공개됩니다.']},
+'teamsync':{'rank':16,'emoji':'🟣','title':'팀 싱크','cat':'팀전/협동','players':'4~12명','time':'8~15분','duration':15*60,'desc':'두 팀으로 나뉘어 팀원끼리 같은 선택을 맞추는 협동전. 상대팀보다 높은 싱크율을 만들면 팀 점수를 얻습니다.','guide':['참가자를 두 팀으로 자동 분배합니다.','각 라운드 모두 같은 A/B 질문을 보고 팀원끼리 상의 없이 선택합니다.','팀 내 같은 선택 비율이 높은 팀이 라운드 승리합니다.','인원이 홀수여도 싱크율로 비교해 공정하게 계산합니다.']}
+})
+
+NUMBER_RULES=[
+('low_unique','가장 낮은 유일한 숫자','겹치지 않은 숫자 중 가장 낮은 숫자가 승리합니다.'),
+('high_unique','가장 높은 유일한 숫자','겹치지 않은 숫자 중 가장 높은 숫자가 승리합니다.'),
+('avg80','평균의 80%','모두의 숫자 평균 × 0.8에 가장 가까운 사람이 승리합니다.'),
+('median','중앙값 사냥','모두가 고른 숫자의 중앙값에 가장 가까운 사람이 승리합니다.'),
+('pair','딱 한 명과 겹치기','자신과 같은 숫자를 고른 사람이 정확히 한 명 더 있으면 승리합니다.'),
+('solo','절대 겹치지 마','아무와도 숫자가 겹치지 않은 사람만 승리합니다.'),
+('closest5','5에 가장 가까이','5에 가장 가까운 숫자를 고른 사람이 승리합니다.'),
+('far5','5에서 가장 멀리','5에서 가장 멀리 떨어진 숫자를 고른 사람이 승리합니다.')
+]
+BLUFF_CLAIMS=[
+('ge6','내 숫자는 6 이상이다.',lambda n:n>=6),('le4','내 숫자는 4 이하이다.',lambda n:n<=4),('odd','내 숫자는 홀수다.',lambda n:n%2==1),('even','내 숫자는 짝수다.',lambda n:n%2==0),('mul3','내 숫자는 3의 배수다.',lambda n:n%3==0),('gt5','내 숫자는 5보다 크다.',lambda n:n>5),('lt5','내 숫자는 5보다 작다.',lambda n:n<5),('edge','내 숫자는 1 또는 9다.',lambda n:n in (1,9))
+]
+
+def ensure_v43(room):
+    s=room.setdefault('settings',{})
+    s.setdefault('small_rounds',8)
+    s.setdefault('small_seconds',10)
+    return room
+
+def small_round_count(room): return max(5,min(12,int(room.get('settings',{}).get('small_rounds',8))))
+def small_seconds(room): return max(6,min(20,int(room.get('settings',{}).get('small_seconds',10))))
+
+def setup_small(room):
+    ensure_v43(room)
+    pids=active_pids(room)
+    room['assignments']={};room['pending']={};room['submissions']={};room['votes']={};room['round_result']=None;room['round_no']=1
+    room['game_data']={'start_scores':{p:room['players'][p]['score'] for p in pids},'small_stage':'ready','small_total':small_round_count(room),'small_index':0,'last_number_values':[]}
+    if room['game_id']=='teamsync':
+        shuffled=list(pids);random.shuffle(shuffled);room['game_data']['teams']={p:('A' if i%2==0 else 'B') for i,p in enumerate(shuffled)}
+    room['public']={'event_title':'게임 준비','event_text':'곧 첫 라운드가 시작됩니다.','story':None,'special':None}
+    room['phase']='countdown';room['deadline']=now()+4;room['interaction_deadline']=None;room['paused']=False;room['pause_remaining']=None;room['paused_at']=None
+
+def start_small_round(room):
+    gid=room['game_id'];gd=room['game_data'];idx=gd['small_index'];pids=active_pids(room);room['submissions']={};room['votes']={};room['round_result']=None;room['round_no']=idx+1;sec=small_seconds(room);gd['interaction_total']=sec
+    if gid in ('match','teamsync'):
+        prompt,a,b=random.choice(MATCH_PROMPTS);gd['match']={'prompt':prompt,'a':a,'b':b};gd['small_stage']='answer'
+        for p in pids:
+            extra={'options':[a,b]}
+            if gid=='teamsync': extra['team']=gd['teams'][p]
+            make_assignment(room,p,'팀 '+gd['teams'][p] if gid=='teamsync' else '싱크 플레이어',prompt,None,extra)
+        room['public']['event_title']=(f'팀 싱크 · {idx+1}/{gd["small_total"]}' if gid=='teamsync' else f'마음 맞추기 · {idx+1}/{gd["small_total"]}')
+        room['public']['event_text']='남의 선택을 보지 말고 하나를 고르세요.'
+    elif gid=='number':
+        rule=random.choice(NUMBER_RULES);gd['number_rule']=rule[0];gd['small_stage']='answer';forbid=None
+        if idx>0 and gd.get('last_number_values') and random.random()<.35: forbid=random.choice(gd['last_number_values'])
+        gd['number_forbid']=forbid
+        for p in pids: make_assignment(room,p,'숫자 플레이어',rule[1],None,{'rule_desc':rule[2],'forbid':forbid})
+        room['public']['event_title']=f'눈치 숫자 · {rule[1]}';room['public']['event_text']=rule[2]+(f' · 이번 라운드 {forbid} 금지' if forbid else '')
+    elif gid=='bluff':
+        bluffer=pids[idx%len(pids)];secret=random.randint(1,9);claims=random.sample(BLUFF_CLAIMS,3);gd.update({'bluffer':bluffer,'secret':secret,'claim_choices':[c[0] for c in claims],'small_stage':'claim'})
+        for p in pids:
+            if p==bluffer: make_assignment(room,p,'블러퍼',f'비밀 숫자: {secret}',None,{'claims':[{'id':c[0],'text':c[1]} for c in claims]})
+            else: make_assignment(room,p,'판정자','블러퍼가 주장을 고르는 중입니다.')
+        room['public']['event_title']=f'블러프 · {room["players"][bluffer]["name"]}의 턴';room['public']['event_text']='블러퍼가 비밀 숫자를 보고 주장을 고르는 중입니다.'
+    elif gid=='chosung':
+        used=room.setdefault('used',{}).setdefault('chosung',[]);pool=[q for q in CHOSUNG_PROMPTS if q['initial']+'|'+q['cat'] not in used] or list(CHOSUNG_PROMPTS);q=random.choice(pool);used.append(q['initial']+'|'+q['cat']);room['used']['chosung']=used[-80:]
+        gd.update({'chosung':q,'small_stage':'answer','hint_revealed':False,'hint_at':now()+max(3,sec//2)})
+        for p in pids: make_assignment(room,p,'초성 플레이어',q['initial'],None,{'category':q['cat'],'hint':None})
+        room['public']['event_title']=f'초성 스피드 · {q["cat"]}';room['public']['event_text']='힌트가 나오기 전에 맞히면 더 높은 점수!'
+    room['interaction_deadline']=now()+sec;room['deadline']=room['interaction_deadline']
+
+def resolve_small(room):
+    gid=room['game_id'];gd=room['game_data'];pids=active_pids(room);subs=room.get('submissions',{});rows=[];winners=[];title='라운드 종료'
+    if gid=='match':
+        vals={p:(subs.get(p) or {}).get('choice') for p in pids};cnt=Counter(v for v in vals.values() if v);mx=max(cnt.values() or [0]);unanimous=(mx==len(pids) and len(pids)>1)
+        for p,v in vals.items():
+            win=bool(v and ((len(pids)==2 and unanimous) or (len(pids)>=3 and cnt[v]==mx and mx>len(pids)/2)));pts=2 if unanimous and win else 1 if win else 0
+            if pts: score(room,p,pts);winners.append(p)
+            rows.append({'player':room['players'][p]['name'],'choice':v or '미응답','correct':win})
+        title='완벽한 싱크!' if unanimous else ('다수파 성공' if winners else '이번엔 엇갈렸어요')
+    elif gid=='teamsync':
+        vals={p:(subs.get(p) or {}).get('choice') for p in pids};teamstats={}
+        for team in ('A','B'):
+            members=[p for p in pids if gd['teams'][p]==team];cnt=Counter(vals[p] for p in members if vals[p]);best=max(cnt.values() or [0]);rate=(best/len(members) if members else 0);teamstats[team]={'rate':rate,'members':members,'best':best}
+        best_rate=max(teamstats['A']['rate'],teamstats['B']['rate']);winning_teams=[t for t in ('A','B') if teamstats[t]['rate']==best_rate and best_rate>0]
+        for p,v in vals.items():
+            team=gd['teams'][p];win=team in winning_teams
+            if win: score(room,p,2 if len(winning_teams)==1 else 1);winners.append(p)
+            rows.append({'player':room['players'][p]['name']+f' · 팀 {team}','choice':v or '미응답','correct':win})
+        title=('팀 '+winning_teams[0]+' 승리' if len(winning_teams)==1 else '팀 싱크 동률')+f' · A {round(teamstats["A"]["rate"]*100)}% / B {round(teamstats["B"]["rate"]*100)}%'
+    elif gid=='number':
+        vals={p:int((subs.get(p) or {}).get('choice',0) or 0) for p in pids};valid={p:v for p,v in vals.items() if 1<=v<=9};rule=gd['number_rule'];winset=[]
+        if valid:
+            cnt=Counter(valid.values())
+            if rule=='low_unique':
+                u=[v for v,c in cnt.items() if c==1];target=min(u) if u else None;winset=[p for p,v in valid.items() if v==target]
+            elif rule=='high_unique':
+                u=[v for v,c in cnt.items() if c==1];target=max(u) if u else None;winset=[p for p,v in valid.items() if v==target]
+            elif rule=='avg80':
+                target=sum(valid.values())/len(valid)*.8;d=min(abs(v-target) for v in valid.values());winset=[p for p,v in valid.items() if abs(v-target)==d]
+            elif rule=='median':
+                arr=sorted(valid.values());m=len(arr);target=arr[m//2] if m%2 else (arr[m//2-1]+arr[m//2])/2;d=min(abs(v-target) for v in valid.values());winset=[p for p,v in valid.items() if abs(v-target)==d]
+            elif rule=='pair': winset=[p for p,v in valid.items() if cnt[v]==2]
+            elif rule=='solo': winset=[p for p,v in valid.items() if cnt[v]==1]
+            elif rule=='closest5':
+                d=min(abs(v-5) for v in valid.values());winset=[p for p,v in valid.items() if abs(v-5)==d]
+            elif rule=='far5':
+                d=max(abs(v-5) for v in valid.values());winset=[p for p,v in valid.items() if abs(v-5)==d]
+        for p,v in vals.items():
+            win=p in winset
+            if win: score(room,p,2);winners.append(p)
+            rows.append({'player':room['players'][p]['name'],'choice':str(v) if v else '미응답','correct':win})
+        gd['last_number_values']=[valid[p] for p in winset if p in valid];title=(' · '.join(room['players'][p]['name'] for p in winset)+' 승리') if winset else '승자 없음'
+    elif gid=='bluff':
+        claim_id=gd.get('claim_id');claim=next((c for c in BLUFF_CLAIMS if c[0]==claim_id),None);truth=bool(claim and claim[2](gd['secret']));bluffer=gd['bluffer'];fooled=0
+        for p in pids:
+            if p==bluffer: continue
+            ch=(subs.get(p) or {}).get('choice');guess=(ch=='truth');ok=(ch in ('truth','lie') and guess==truth)
+            if ok: score(room,p,2);winners.append(p)
+            elif ch in ('truth','lie'): fooled+=1
+            rows.append({'player':room['players'][p]['name'],'choice':'진실' if ch=='truth' else '거짓' if ch=='lie' else '미응답','correct':ok})
+        if fooled: score(room,bluffer,fooled);winners.append(bluffer)
+        rows.insert(0,{'player':room['players'][bluffer]['name']+' · 블러퍼','choice':f'실제 숫자 {gd["secret"]}','correct':fooled>0});title=('진실이었다' if truth else '거짓이었다')+f' · {fooled}명 속음'
+    elif gid=='chosung':
+        q=gd['chosung']
+        def norm(x): return ''.join(str(x).strip().lower().split())
+        answers={norm(x) for x in q['answers']};correct=[]
+        for p,v in subs.items():
+            text=str(v.get('text',''));ok=norm(text) in answers
+            if ok: correct.append((float(v.get('ts',now())),p,bool(v.get('after_hint'))))
+        correct.sort()
+        for rank,(_,p,after_hint) in enumerate(correct):
+            pts=max(1,(3 if rank==0 else 2)-(1 if after_hint else 0));score(room,p,pts);winners.append(p)
+        for p in pids:
+            v=subs.get(p);text=(v or {}).get('text') or '미응답';ok=any(p==x[1] for x in correct);rows.append({'player':room['players'][p]['name'],'choice':text,'correct':ok,'fastest':bool(correct and p==correct[0][1])})
+        title='정답 '+q['answers'][0]
+    room['round_result']={'stage':'small_result','title':title,'answers':rows,'winner_ids':winners};gd['small_stage']='result';gd['interaction_total']=4;room['interaction_deadline']=now()+4;room['deadline']=room['interaction_deadline'];room['public']['event_title']='결과 공개';room['public']['event_text']=title
+
+def next_small(room):
+    gd=room['game_data'];gd['small_index']+=1
+    if gd['small_index']>=gd['small_total']: finish_game(room)
+    else: start_small_round(room)
+
+_V43_SETUP_GAME=setup_game
+def setup_game(room,replay=False):
+    if room.get('game_id') in SMALL_GAMES: return setup_small(room)
+    return _V43_SETUP_GAME(room,replay)
+
+_V43_TICK=tick
+def tick(room):
+    if room.get('game_id') not in SMALL_GAMES: return _V43_TICK(room)
+    gd=room.get('game_data',{})
+    if room.get('phase')=='countdown' and room.get('deadline') and now()>=room['deadline']:
+        room['phase']='play';room['phase_started']=now();start_small_round(room);return
+    if room.get('phase')!='play' or room.get('paused'): return
+    if room['game_id']=='chosung' and gd.get('small_stage')=='answer' and not gd.get('hint_revealed') and now()>=gd.get('hint_at',1e18):
+        gd['hint_revealed']=True;q=gd['chosung'];room['public']['event_text']='힌트: '+q['hint']
+        for p in active_pids(room):
+            a=room['assignments'].get(p)
+            if a: a.setdefault('extra',{})['hint']=q['hint']
+    if room.get('interaction_deadline') and now()>=room['interaction_deadline']:
+        if gd.get('small_stage') in ('answer','vote'): resolve_small(room)
+        elif gd.get('small_stage')=='claim':
+            cid=random.choice(gd['claim_choices']);gd['claim_id']=cid;gd['small_stage']='vote';text=next(c[1] for c in BLUFF_CLAIMS if c[0]==cid);room['public']['event_text']=room['players'][gd['bluffer']]['name']+'의 주장: '+text;room['submissions']={};room['interaction_deadline']=now()+small_seconds(room);room['deadline']=room['interaction_deadline']
+            for p in active_pids(room):
+                if p!=gd['bluffer']: make_assignment(room,p,'판정자',text,None,{'vote_options':['truth','lie']})
+        elif gd.get('small_stage')=='result': next_small(room)
+
+_V43_HANDLE_SUBMIT=handle_submit
+def handle_submit(room,pid,data):
+    gid=room.get('game_id')
+    if gid not in SMALL_GAMES: return _V43_HANDLE_SUBMIT(room,pid,data)
+    gd=room['game_data'];stage=gd.get('small_stage')
+    if gid=='bluff' and stage=='claim':
+        if pid!=gd.get('bluffer'): raise ValueError('블러퍼만 주장을 선택할 수 있습니다.')
+        cid=str(data.get('choice',''))
+        if cid not in gd.get('claim_choices',[]): raise ValueError('제시된 주장 중 하나를 골라 주세요.')
+        gd['claim_id']=cid;gd['small_stage']='vote';room['submissions']={};text=next(c[1] for c in BLUFF_CLAIMS if c[0]==cid);room['public']['event_text']=room['players'][pid]['name']+'의 주장: '+text
+        for p in active_pids(room):
+            if p!=pid: make_assignment(room,p,'판정자',text,None,{'vote_options':['truth','lie']})
+        room['interaction_deadline']=now()+small_seconds(room);room['deadline']=room['interaction_deadline'];return
+    if stage not in ('answer','vote'): raise ValueError('지금은 제출할 수 없습니다.')
+    if pid in room.get('submissions',{}): raise ValueError('이미 선택했습니다.')
+    if gid in ('match','teamsync'):
+        choice=str(data.get('choice',''));opts=(room['assignments'].get(pid) or {}).get('extra',{}).get('options',[])
+        if choice not in opts: raise ValueError('보기 중 하나를 선택해 주세요.')
+        room['submissions'][pid]={'choice':choice,'ts':now()}
+    elif gid=='number':
+        try: v=int(data.get('choice'))
+        except: raise ValueError('1~9 중 숫자를 골라 주세요.')
+        if not 1<=v<=9 or v==gd.get('number_forbid'): raise ValueError('선택할 수 없는 숫자입니다.')
+        room['submissions'][pid]={'choice':v,'ts':now()}
+    elif gid=='bluff':
+        if pid==gd.get('bluffer'): raise ValueError('블러퍼는 판정에 참여하지 않습니다.')
+        ch=str(data.get('choice',''))
+        if ch not in ('truth','lie'): raise ValueError('진실 또는 거짓을 선택해 주세요.')
+        room['submissions'][pid]={'choice':ch,'ts':now()}
+    elif gid=='chosung':
+        text=str(data.get('text','')).strip()[:24]
+        if not text: raise ValueError('정답을 입력해 주세요.')
+        room['submissions'][pid]={'text':text,'ts':now(),'after_hint':bool(gd.get('hint_revealed'))}
+    needed=len(active_pids(room))-(1 if gid=='bluff' else 0)
+    if len(room['submissions'])>=needed: resolve_small(room)
+
+_V43_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V43_PUBLIC_GAME_DATA(room,pid)
+    if room.get('game_id') in SMALL_GAMES:
+        gd=room.get('game_data',{});out.update({'small_stage':gd.get('small_stage'),'small_index':gd.get('small_index',0)+1,'small_total':gd.get('small_total',0),'my_submitted':pid in room.get('submissions',{}),'submitted':len(room.get('submissions',{})),'needed':len(active_pids(room))-(1 if room.get('game_id')=='bluff' else 0),'interaction_total':gd.get('interaction_total',0)})
+    return out
+
+_V43_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V43_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.3';return out
+
+_V43_GET=Handler.do_GET
+def _v43_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health': return self.send_json({'ok':True,'version':'player-first-final-4.3'})
+    return _V43_GET(self)
+Handler.do_GET=_v43_do_get
