@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: bamnolja-party-game
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && python -m py_compile server.py content_pack_v3.py
+    startCommand: python server.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: ROOM_TTL_SECONDS
+        value: "43200"
