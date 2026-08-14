@@ -1,0 +1,96 @@
+    def translate_path(self,path):
+        # Serve only files inside STATIC. Prevent ../ path traversal.
+        raw=urllib.parse.unquote(urllib.parse.urlparse(path).path)
+        rel='index.html' if raw in ('/','/index.html') else raw.lstrip('/')
+        root=STATIC.resolve(); target=(STATIC/rel).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError:
+            return str(STATIC/'__not_found__')
+        return str(target)
+    def end_headers(self):
+        self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('X-Frame-Options','SAMEORIGIN')
+        self.send_header('Referrer-Policy','same-origin')
+        self.send_header('Permissions-Policy','camera=(), microphone=(), geolocation=()')
+        self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'")
+        super().end_headers()
+    def log_message(self,fmt,*args): pass
+    def send_json(self,obj,status=200):
+        raw=json.dumps(obj,ensure_ascii=False).encode('utf-8');self.send_response(status);self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Content-Length',str(len(raw)));self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw)
+    def read_json(self):
+        n=int(self.headers.get('Content-Length','0') or 0)
+        if n>32768: raise ValueError('요청이 너무 큽니다.')
+        raw=self.rfile.read(n) if n else b'{}'
+        return json.loads(raw.decode('utf-8') or '{}')
+    def do_GET(self):
+        u=urllib.parse.urlparse(self.path);q=urllib.parse.parse_qs(u.query)
+        if u.path=='/api/health':
+            return self.send_json({'ok':True,'rooms':len(ROOMS),'version':'player-first-final-4.0'})
+        if u.path=='/api/state':
+            code=(q.get('room',[''])[0]).upper();pid=q.get('pid',[''])[0]
+            with LOCK:
+                room=ROOMS.get(code)
+                if not room:return self.send_json({'error':'방을 찾을 수 없습니다.'},404)
+                # pid가 있으면 반드시 해당 플레이어의 비밀 토큰이 필요합니다.
+                if pid and not authenticated_player(room,pid,self.headers.get('X-Player-Token','')):
+                    return self.send_json({'error':'참가자 인증에 실패했습니다.'},403)
+                return self.send_json(state_for(room,pid,public_origin(self.headers)))
+        if u.path=='/api/qr':
+            code=(q.get('room',[''])[0]).upper();
+            with LOCK:
+                if code not in ROOMS:return self.send_error(404)
+            url=f'{public_origin(self.headers)}/?room={code}'
+            try:
+                import qrcode
+                import qrcode.image.svg
+                img=qrcode.make(url,image_factory=qrcode.image.svg.SvgPathImage,box_size=8,border=2)
+                import io
+                b=io.BytesIO();img.save(b);raw=b.getvalue();self.send_response(200);self.send_header('Content-Type','image/svg+xml');self.send_header('Content-Length',str(len(raw)));self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw);return
+            except Exception as e:
+                return self.send_json({'error':str(e),'url':url},500)
+        return super().do_GET()
+    def do_POST(self):
+        try:data=self.read_json()
+        except:return self.send_json({'error':'잘못된 요청입니다.'},400)
+        try:
+            if self.path=='/api/create':
+                with LOCK:
+                    cleanup_rooms(); code,pid,token=make_room(data.get('name') or '방장'); save_rooms()
+                    return self.send_json({'room':code,'pid':pid,'token':token,'join_url':f'{public_origin(self.headers)}/?room={code}'})
+            if self.path=='/api/join':
+                code=str(data.get('room','')).upper();name=str(data.get('name','참가자')).strip()[:12]
+                with LOCK:
+                    room=ROOMS.get(code)
+                    if not room:return self.send_json({'error':'방을 찾을 수 없습니다.'},404)
+                    if room['phase'] not in ('lobby','games','guide','result'): return self.send_json({'error':'진행 중인 게임입니다. 다음 판부터 참가할 수 있도록 방장에게 요청하세요.'},409)
+                    if len([p for p in room['players'].values() if p.get('active')])>=15: return self.send_json({'error':'한 방에는 최대 15명까지 참가할 수 있습니다.'},409)
+                    pid=uid();token=auth_token();add_player(room,pid,name,False,token);room['last_access']=now();save_rooms();return self.send_json({'room':code,'pid':pid,'token':token})
+            if self.path=='/api/action':
+                code=str(data.get('room','')).upper();pid=str(data.get('pid',''))
+                with LOCK:
+                    room=ROOMS.get(code)
+                    if not room:return self.send_json({'error':'방을 찾을 수 없습니다.'},404)
+                    if not authenticated_player(room,pid,self.headers.get('X-Player-Token','')):
+                        return self.send_json({'error':'참가자 인증에 실패했습니다.'},403)
+                    do_action(room,pid,data);room['last_access']=now();save_rooms();return self.send_json({'ok':True})
+        except ValueError as e:return self.send_json({'error':str(e)},400)
+        except Exception as e:return self.send_json({'error':f'서버 오류: {e}'},500)
+        return self.send_json({'error':'경로를 찾을 수 없습니다.'},404)
+
+def main():
+    os.chdir(STATIC)
+    load_rooms()
+    ip=lan_ip()
+    print('\n'+'='*60)
+    print(' 밤놀자 멀티플레이 서버')
+    print(f' 로컬에서 열기:  http://localhost:{PORT}')
+    print(f' 같은 Wi-Fi:      http://{ip}:{PORT}')
+    print(' 클라우드 배포 시 Render/Railway 공개 URL을 그대로 사용합니다.')
+    print(' 종료: Ctrl + C')
+    print('='*60+'\n')
+    server=ThreadingHTTPServer((HOST,PORT),Handler)
+    try:server.serve_forever()
+    except KeyboardInterrupt:print('\n서버를 종료합니다.')
+
+if __name__=='__main__':main()
