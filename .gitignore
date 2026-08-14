@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+rooms_state.json
+rooms_state.json.tmp
+.DS_Store
+.env
