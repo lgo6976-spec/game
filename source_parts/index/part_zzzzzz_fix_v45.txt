@@ -1,0 +1,36 @@
+<style>
+.reactionStage{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:250px;border-radius:22px;border:1px solid var(--line);background:var(--soft);text-align:center;padding:18px}.reactionCue{font-size:56px;font-weight:1000;letter-spacing:-2px}.reactionSub{margin-top:8px;color:var(--muted);font-weight:800}.reactionTap{width:100%;min-height:120px;border:0;border-radius:22px;font-size:34px;font-weight:1000;background:linear-gradient(135deg,var(--accent2),var(--accent));color:#fff}.reactionTap.stop{background:rgba(255,103,109,.15);color:var(--text);border:1px solid var(--line)}.mafiaPhase{padding:12px;border-radius:16px;background:var(--soft);margin-bottom:10px}.mafiaRole{font-size:26px;font-weight:1000}.mafiaHint{font-size:12px;color:var(--muted);margin-top:5px}.mafiaDead{opacity:.55;filter:grayscale(.3)}
+</style>
+<script>
+const _v45SmallGame=smallGame;smallGame=function(){return _v45SmallGame()||['reaction','mafia'].includes(S?.game_id)};
+function alivePeopleSelect(id){return `<select id="${id}">${S.players.filter(p=>p.active&&p.alive&&p.id!==S.me.id).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>`}
+function renderReactionUI(){let d=$('privateActions'),m=$('minorActions'),gd=S.game_data_public||{},stage=gd.reaction_stage;d.dataset.sig=JSON.stringify(['reaction',stage,gd.reaction_index,gd.my_submitted,gd.reaction_false]);m.innerHTML='';
+ if(stage==='wait'){d.innerHTML=`<div class="reactionStage"><div class="reactionCue">…</div><div class="reactionSub">아직 누르지 마세요</div><button class="reactionTap" style="margin-top:18px" onclick="act('reaction_tap')">대기</button></div>`;return}
+ if(stage==='cue'){let stop=gd.reaction_mode==='stop';if(gd.my_submitted||gd.reaction_false){d.innerHTML=`<div class="notice">반응 완료 · 결과를 기다리세요.</div>`;return}d.innerHTML=`<div class="reactionStage"><div class="reactionCue">${stop?'STOP':'GO!'}</div><div class="reactionSub">${stop?'누르면 안 됩니다':'지금 최대한 빠르게 누르세요'}</div>${stop?`<button class="reactionTap stop" onclick="act('reaction_tap')">누르지 마세요</button>`:`<button class="reactionTap" onclick="act('reaction_tap')">TAP</button>`}</div>`;return}
+ d.innerHTML='<div class="notice">결과 공개 중 · 잠시 뒤 다음 라운드가 시작됩니다.</div>'}
+function renderMafiaUI(){let d=$('privateActions'),m=$('minorActions'),gd=S.game_data_public||{},stage=gd.mafia_stage,a=S.assignment||{},alive=S.players.find(p=>p.id===S.me.id)?.alive!==false;d.dataset.sig=JSON.stringify(['mafia',stage,gd.mafia_day,gd.my_action,gd.my_vote,a.role,alive]);m.innerHTML='';
+ if(!alive){d.innerHTML='<div class="notice mafiaDead">탈락했습니다. 남은 플레이어의 토론을 지켜보세요. 게임 정보는 공개하지 마세요.</div>';return}
+ if(stage==='night'){
+   if(!['마피아','경찰','의사'].includes(a.role)){d.innerHTML='<div class="notice">🌙 밤입니다. 조용히 기다리세요.</div>';return}
+   if(gd.my_action){d.innerHTML='<div class="notice">밤 행동 선택 완료 · 다른 역할을 기다립니다.</div>';return}
+   let action=a.role==='마피아'?'제거 대상':a.role==='경찰'?'조사 대상':'보호 대상';d.innerHTML=`<div class="mafiaPhase"><div class="mafiaRole">${esc(a.role)}</div><div class="mafiaHint">${action}을 한 명 선택하세요.</div></div>${alivePeopleSelect('mafiaNightSel')}<button class="btn primary full" style="margin-top:8px" onclick="act('mafia_night_action',{target:$('mafiaNightSel').value})">${action} 선택</button>`;return
+ }
+ if(stage==='morning'){d.innerHTML='<div class="notice">아침 결과 공개 중입니다.</div>';return}
+ if(stage==='discuss'){d.innerHTML='<div class="mafiaPhase"><div class="mafiaRole">☀️ 토론 시간</div><div class="mafiaHint">휴대폰을 내려놓고 누가 마피아인지 이야기하세요.</div></div>';return}
+ if(stage==='vote'){
+   if(gd.my_vote){d.innerHTML='<div class="notice">투표 완료 · 다른 생존자를 기다립니다.</div>';return}
+   d.innerHTML=`<div class="mafiaPhase"><div class="mafiaRole">🗳️ 최종 지목</div><div class="mafiaHint">가장 의심스러운 한 명을 고르세요.</div></div>${alivePeopleSelect('mafiaVoteSel')}<button class="btn danger full" style="margin-top:8px" onclick="act('mafia_vote',{target:$('mafiaVoteSel').value})">투표</button>`;return
+ }
+ d.innerHTML='<div class="notice">투표 결과 공개 중입니다.</div>'}
+const _v45RenderSmallActions=renderSmallActions;renderSmallActions=function(){if(S?.game_id==='reaction')return renderReactionUI();if(S?.game_id==='mafia')return renderMafiaUI();return _v45RenderSmallActions()};
+const _v45RenderPlay=renderPlay;renderPlay=function(){_v45RenderPlay();if(S?.game_id==='reaction'){let gd=S.game_data_public||{};$('roundText').textContent=`${gd.reaction_index||1}/${gd.reaction_total||8} 라운드`;$('role').textContent='반응 테스트';$('targetLine').textContent=gd.reaction_stage==='wait'?'가짜 시작을 조심하세요':'';$('mission').textContent=gd.reaction_stage==='cue'?(gd.reaction_mode==='stop'?'STOP이면 누르지 마세요':'GO면 즉시 TAP'):'신호를 기다리세요.'}else if(S?.game_id==='mafia'){let gd=S.game_data_public||{};$('roundText').textContent=`${gd.mafia_day||1}일차 · ${gd.mafia_stage||''}`;$('role').textContent=S.assignment?.role||'플레이어';$('mission').textContent=S.assignment?.mission||'진행을 기다리세요.';$('targetLine').textContent=`생존 ${gd.alive_count||0}명`}};
+const _v45RenderRoundResult=renderRoundResult;renderRoundResult=function(){if(!['reaction','mafia'].includes(S?.game_id))return _v45RenderRoundResult();let r=S?.round_result;$('roundResultBox').classList.toggle('hidden',!r);if(!r)return;let rows=(r.answers||[]).map(x=>`<div class="answerPerson ${x.correct?'smallWinner':'smallLoser'}"><span>${x.fastest?'⚡ ':x.correct?'✓ ':'✕ '}${esc(x.player)}</span><b>${esc(x.choice)}${x.points?` · +${x.points}`:''}</b></div>`).join('');$('roundResult').innerHTML=`<div class="smallResultTitle">${esc(r.title||'결과')}</div>${r.text?`<div class="notice">${esc(r.text)}</div>`:''}${rows?`<div class="answerReveal" style="margin-top:8px">${rows}</div>`:''}`};
+
+// v4.5 sound motifs
+let _v45LastReactionStage=null,_v45LastMafiaStage=null;
+function v45SoundPulse(oldS,newS){if(!audioEnabled||!newS)return;
+ if(newS.game_id==='reaction'){let st=newS.game_data_public?.reaction_stage;if(st!==_v45LastReactionStage){if(st==='cue'){let stop=newS.game_data_public?.reaction_mode==='stop';if(stop){tone(170,.09,'square',.035);tone(130,.12,'square',.03,.08);vibrate(80)}else{tone(760,.04,'square',.04);tone(980,.06,'square',.045,.045);vibrate([35,20,45])}}else if(st==='result'){tone(520,.05);tone(690,.08,'sine',.03,.06)}_v45LastReactionStage=st}}
+ if(newS.game_id==='mafia'){let st=newS.game_data_public?.mafia_stage;if(st!==_v45LastMafiaStage){if(st==='night'){tone(82,.25,'sine',.022);tone(110,.18,'triangle',.014,.16)}else if(st==='morning'){tone(250,.08);tone(390,.11,'sine',.03,.08)}else if(st==='discuss'){tone(430,.04,'triangle',.018);tone(570,.05,'triangle',.018,.055)}else if(st==='vote'){tone(190,.06,'square',.028);tone(190,.06,'square',.028,.11);vibrate([45,35,45])}else if(st==='vote_result'){tone(260,.12);tone(390,.15,'sine',.035,.11)}_v45LastMafiaStage=st}}
+}
+const _v45HandleAudio=handleAudio;handleAudio=function(oldS,newS){_v45HandleAudio(oldS,newS);v45SoundPulse(oldS,newS)};
+</script>
