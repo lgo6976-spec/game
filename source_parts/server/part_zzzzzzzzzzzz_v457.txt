@@ -1,0 +1,91 @@
+# v4.5.7: runtime bug fixes found during final review.
+# - Forced runoff ties now resolve deterministically enough to avoid endless no-elimination loops.
+# - Discussion controls cannot be used while paused.
+# - Paused time no longer counts toward discussion elapsed time.
+# - +1 minute extension resets the final 20-second warning.
+
+
+def resolve_mafia_final_vote(room):
+    gd=room['game_data'];alive=mafia_alive(room);candidates=gd.get('mafia_candidates',[])
+    votes={p:t for p,t in gd.get('mafia_final_votes',{}).items() if p in alive and (t in candidates or t=='abstain')}
+    cnt=Counter(votes.values());elim=None;tie_note=''
+    candidate_counts={p:cnt[p] for p in candidates};best=max(candidate_counts.values() or [0]);tops=[p for p,v in candidate_counts.items() if v==best and best>0];abstain=cnt.get('abstain',0)
+    forced=not bool(gd.get('mafia_abstain_allowed'))
+    if len(tops)==1 and (forced or best>abstain):
+        elim=tops[0]
+    elif forced and len(tops)>=2:
+        # A forced runoff must actually end. First use the previous nomination as a fair tie-break.
+        nom=Counter(gd.get('mafia_nomination_votes',{}).values());nom_best=max([nom[p] for p in tops] or [0]);nom_tops=[p for p in tops if nom[p]==nom_best]
+        if len(nom_tops)==1:
+            elim=nom_tops[0];tie_note=' 결선 동률이라 1차 지목표가 더 많았던 후보가 탈락했습니다.'
+        else:
+            elim=random.choice(nom_tops);tie_note=' 결선과 1차 지목까지 완전 동률이라 시스템 추첨으로 결정했습니다.'
+    if elim:
+        room['players'][elim]['alive']=False;reveal=_mafia_team_label(room,elim) if _mafia_small(room) else _mafia_role(room,elim)
+        text=f'{_mafia_name(room,elim)}님이 탈락했습니다. 공개 정보: {reveal}.'+tie_note;gd['mafia_no_elim_streak']=0
+    else:
+        text='결선 결과 한 명을 확정하지 못해 아무도 탈락하지 않았습니다.';gd['mafia_no_elim_streak']=gd.get('mafia_no_elim_streak',0)+1
+    rows=[{'name':_mafia_name(room,p),'count':cnt[p]} for p in candidates]
+    if gd.get('mafia_abstain_allowed'):rows.append({'name':'살려둔다','count':abstain})
+    room['round_result']={'stage':'mafia_vote_result','title':'결선 결과','text':text,'counts':rows};room['public']['event_title']='투표 결과';room['public']['event_text']=text
+    if mafia_check_win(room):return
+    gd['mafia_stage']='vote_result';room['interaction_deadline']=now()+7;room['deadline']=room['interaction_deadline']
+
+
+def _mafia_extend_discussion(room,pid):
+    gd=room.get('game_data',{});day=int(gd.get('mafia_day',1))
+    if room.get('phase')!='play' or room.get('paused'):raise ValueError('게임이 진행 중일 때만 토론을 연장할 수 있습니다.')
+    if not _mafia_host(room,pid):raise ValueError('방장만 토론을 연장할 수 있습니다.')
+    if gd.get('mafia_stage')!='discuss':raise ValueError('지금은 토론 시간이 아닙니다.')
+    if gd.get('mafia_discuss_extended_day')==day:raise ValueError('오늘은 이미 토론을 한 번 연장했습니다.')
+    ts=now();rem=max(0,float(room.get('interaction_deadline') or ts)-ts)
+    if rem>30:raise ValueError('토론 종료 30초 전부터 연장할 수 있습니다.')
+    room['interaction_deadline']=max(ts,float(room.get('interaction_deadline') or ts))+60;room['deadline']=room['interaction_deadline'];gd['mafia_discuss_extended_day']=day;gd['mafia_discuss_total']=int(gd.get('mafia_discuss_total',0))+60;gd['mafia_discuss_warning']=False
+    room['public']['event_title']='⏱ 토론 +1분';room['public']['event_text']='방장이 토론을 60초 연장했습니다. 핵심 쟁점을 더 확인하세요.'
+
+
+def _mafia_skip_discussion(room,pid):
+    gd=room.get('game_data',{})
+    if room.get('phase')!='play' or room.get('paused'):raise ValueError('게임이 진행 중일 때만 토론을 마감할 수 있습니다.')
+    if not _mafia_host(room,pid):raise ValueError('방장만 토론을 마감할 수 있습니다.')
+    if gd.get('mafia_stage')!='discuss':raise ValueError('지금은 토론 시간이 아닙니다.')
+    elapsed=now()-float(gd.get('mafia_discuss_started_at') or now())
+    if elapsed<30:raise ValueError('최소 30초는 토론한 뒤 바로 지목할 수 있습니다.')
+    start_mafia_nomination(room)
+
+
+_V457_DO_ACTION=do_action
+def do_action(room,pid,data):
+    t=data.get('type')
+    if room.get('game_id')=='mafia' and t=='pause':
+        was_paused=bool(room.get('paused'));paused_at=room.get('paused_at');resume_ts=now()
+        result=_V457_DO_ACTION(room,pid,data)
+        # Base pause logic shifts deadlines, but discussion elapsed time also needs to exclude paused duration.
+        if was_paused and not room.get('paused') and paused_at and room.get('game_data',{}).get('mafia_discuss_started_at'):
+            room['game_data']['mafia_discuss_started_at']+=max(0,resume_ts-paused_at)
+        return result
+    return _V457_DO_ACTION(room,pid,data)
+
+
+_V457_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V457_PUBLIC_GAME_DATA(room,pid);gd=room.get('game_data',{})
+    if room.get('game_id')=='mafia':
+        st=gd.get('mafia_stage');ref=float(room.get('paused_at') or now()) if room.get('paused') else now();day=int(gd.get('mafia_day',1))
+        rem=max(0,float(room.get('interaction_deadline') or ref)-ref) if st=='discuss' else 0
+        elapsed=max(0,ref-float(gd.get('mafia_discuss_started_at') or ref)) if st=='discuss' else 0
+        usable=room.get('phase')=='play' and not room.get('paused') and st=='discuss' and _mafia_host(room,pid)
+        out['can_extend_discussion']=bool(usable and rem<=30 and gd.get('mafia_discuss_extended_day')!=day)
+        out['can_skip_discussion']=bool(usable and elapsed>=30)
+    return out
+
+
+_V457_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V457_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.7';return out
+
+_V457_GET=Handler.do_GET
+def _v457_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.7'})
+    return _V457_GET(self)
+Handler.do_GET=_v457_do_get
