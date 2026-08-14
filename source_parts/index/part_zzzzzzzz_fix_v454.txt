@@ -1,0 +1,33 @@
+<style>
+.mafiaEvidence{padding:13px 14px;border-radius:16px;border:1px solid var(--line);background:var(--soft);margin-bottom:9px}.mafiaEvidence .kicker{font-size:11px;font-weight:950;color:var(--muted);margin-bottom:6px}.mafiaEvidence .body{font-size:14px;font-weight:850;line-height:1.45}.mafiaTask{padding:11px 13px;border-radius:14px;border:1px dashed var(--line);font-size:12px;line-height:1.45;margin-bottom:10px}.mafiaRunoff{display:grid;gap:8px}.mafiaRunoff button{min-height:58px}.mafiaPublicInfo{font-size:11px;color:var(--muted);margin-top:5px}
+</style>
+<script>
+function mafiaEvidenceBlock(){let gd=S.game_data_public||{},e=gd.day_evidence,t=gd.discussion_task;let h='';if(e)h+=`<div class="mafiaEvidence"><div class="kicker">내 개인 단서</div><div class="body">${esc(e)}</div></div>`;if(t)h+=`<div class="mafiaTask"><b>토론 행동</b><br>${esc(t)}</div>`;return h}
+function mafiaCandidatesText(){let ids=S.game_data_public?.candidates||[];return ids.map(id=>nameOf(id)).filter(Boolean).join(' vs ')}
+function renderMafiaUI(){let d=$('privateActions'),m=$('minorActions'),gd=S.game_data_public||{},stage=gd.mafia_stage,a=S.assignment||{},alive=S.players.find(p=>p.id===S.me.id)?.alive!==false;d.dataset.sig=JSON.stringify(['mafia454',stage,gd.mafia_day,gd.my_action,gd.my_nomination,gd.my_final_vote,a.role,alive,gd.candidates,gd.day_evidence]);m.innerHTML='';
+ let summary=gd.role_summary?`<div class="mafiaPublicInfo">역할 구성 · ${esc(gd.role_summary)}</div>`:'';
+ if(!alive){d.innerHTML=`<div class="notice mafiaDead">탈락했습니다. 남은 사람의 토론을 지켜보되, 생전에 받은 개인 정보는 공개하지 마세요.</div>${summary}`;return}
+ if(stage==='night'){
+   if(!['마피아','경찰','의사'].includes(a.role)){d.innerHTML=`<div class="notice">🌙 밤입니다. 조용히 기다리세요.</div>${summary}`;return}
+   if(gd.my_action){d.innerHTML=`<div class="notice">밤 행동 선택 완료 · 다른 역할을 기다립니다.</div>${summary}`;return}
+   let action=a.role==='마피아'?'제거 대상':a.role==='경찰'?'조사 대상':'보호 대상';d.innerHTML=`<div class="mafiaPhase"><div class="mafiaRole">${esc(a.role)}</div><div class="mafiaHint">${action}을 한 명 선택하세요.</div>${summary}</div>${alivePeopleSelect('mafiaNightSel')}<button class="btn primary full" style="margin-top:8px" onclick="act('mafia_night_action',{target:$('mafiaNightSel').value})">${action} 선택</button>`;return
+ }
+ if(stage==='morning'){d.innerHTML=`${mafiaEvidenceBlock()}<div class="notice">아침 결과를 확인하고 곧 시작될 토론에서 이 정보를 어떻게 사용할지 생각하세요.</div>${summary}`;return}
+ if(stage==='discuss'){d.innerHTML=`${mafiaEvidenceBlock()}<div class="mafiaPhase"><div class="mafiaRole">☀️ 토론 시간</div><div class="mafiaHint">단서는 사람마다 다릅니다. 서로의 주장 중 겹치는 부분과 모순되는 부분을 찾으세요.</div>${summary}</div>`;return}
+ if(stage==='nominate'){
+   if(gd.my_nomination){d.innerHTML=`${mafiaEvidenceBlock()}<div class="notice">1차 지목 완료 · 다른 생존자를 기다립니다.</div>`;return}
+   d.innerHTML=`${mafiaEvidenceBlock()}<div class="mafiaPhase"><div class="mafiaRole">👁️ 1차 용의자 지목</div><div class="mafiaHint">토론에서 가장 모순이 컸던 한 명을 고르세요.</div></div>${alivePeopleSelect('mafiaNomSel')}<button class="btn danger full" style="margin-top:8px" onclick="act('mafia_nominate',{target:$('mafiaNomSel').value})">용의자로 지목</button>`;return
+ }
+ if(stage==='defense'){let names=mafiaCandidatesText();d.innerHTML=`${mafiaEvidenceBlock()}<div class="mafiaPhase"><div class="mafiaRole">🗣️ 최후변론</div><div class="mafiaHint">결선 후보 · ${esc(names)}<br>후보들은 자신의 주장과 단서를 짧게 정리하세요. 나머지는 듣기만 합니다.</div></div>`;return}
+ if(stage==='final_vote'){
+   if(gd.my_final_vote){d.innerHTML='<div class="notice">결선투표 완료 · 결과를 기다립니다.</div>';return}
+   let ids=(gd.candidates||[]).filter(id=>id!==S.me.id),buttons=ids.map(id=>`<button class="btn danger full" onclick="act('mafia_final_vote',{target:'${id}'})">${esc(nameOf(id))} 탈락</button>`).join('');if(gd.abstain_allowed)buttons+=`<button class="btn ghost full" onclick="act('mafia_final_vote',{target:'abstain'})">아직 확신 없음 · 살려둔다</button>`;d.innerHTML=`${mafiaEvidenceBlock()}<div class="mafiaPhase"><div class="mafiaRole">🗳️ 결선투표</div><div class="mafiaHint">최후변론까지 듣고 최종 결정하세요.</div></div><div class="mafiaRunoff">${buttons}</div>`;return
+ }
+ d.innerHTML='<div class="notice">결과 공개 중입니다.</div>'}
+
+const _v454RenderPlay=renderPlay;renderPlay=function(){_v454RenderPlay();if(S?.game_id!=='mafia')return;let gd=S.game_data_public||{},label={night:'밤',morning:'아침',discuss:'토론',nominate:'1차 지목',defense:'최후변론',final_vote:'결선투표',vote_result:'결과'}[gd.mafia_stage]||gd.mafia_stage;$('roundText').textContent=`${gd.mafia_day||1}일차 · ${label}`;$('targetLine').textContent=`생존 ${gd.alive_count||0}명${gd.role_summary?' · '+gd.role_summary:''}`};
+
+// Extra stage motifs for the deeper Mafia flow.
+let _v454MafiaStage=null;function mafia454Audio(newS){if(!audioEnabled||newS?.game_id!=='mafia')return;let st=newS.game_data_public?.mafia_stage;if(st===_v454MafiaStage)return;_v454MafiaStage=st;if(st==='nominate'){tone(240,.05,'square',.025);tone(310,.05,'square',.02,.09)}else if(st==='defense'){tone(330,.08,'triangle',.025);tone(440,.12,'triangle',.025,.09)}else if(st==='final_vote'){tone(155,.08,'square',.03);tone(155,.08,'square',.03,.13);vibrate([50,40,50])}else if(st==='morning'){tone(280,.07);tone(430,.11,'sine',.03,.08)}}
+const _v454HandleAudio=handleAudio;handleAudio=function(oldS,newS){_v454HandleAudio(oldS,newS);mafia454Audio(newS)};
+</script>
