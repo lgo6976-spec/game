@@ -1,0 +1,120 @@
+            expired.append((pend_id,p))
+    for pend_id,p in expired:
+        # Friendly party-game default: unanswered verification auto-approves to keep pace.
+        apply_success(room,p['from'],p['target'],p['kind'])
+        room['pending'].pop(pend_id,None)
+        room['public']['event_title']='자동 확인'
+        room['public']['event_text']='확인이 늦어 성공 신고가 자동 승인되었습니다.'
+
+def tick(room):
+    if room['phase']=='countdown' and room.get('deadline') and now()>=room['deadline']: enter_play(room)
+    if room['phase']=='play' and not room.get('paused'):
+        expire_pending(room)
+        if room.get('interaction_deadline') and now()>=room['interaction_deadline']:
+            auto_advance_interaction(room)
+        if room.get('next_auto_event') and now()>=room['next_auto_event'] and room['game_id'] not in ('oddq','anon','choice'):
+            trigger_event(room)
+        # 펜션의 밤은 종료 3분 전 자동으로 최종 국면을 알려준다.
+        if room['game_id']=='night' and room.get('deadline'):
+            rem=room['deadline']-now()
+            if rem<=180 and not room['game_data'].get('final_phase'):
+                room['game_data']['final_phase']=True
+                room['public']['event_title']='FINAL'
+                room['public']['event_text']='3분 남았습니다. 이제 범인을 정하고 최종 투표를 완료하세요.'
+        if room.get('deadline') and now()>=room['deadline']:
+            if room['game_id']=='night' and room.get('votes'):
+                resolve_night_vote(room)
+            else:
+                finish_game(room)
+
+
+def cleanup_rooms():
+    cutoff=now()-ROOM_TTL
+    dead=[code for code,r in ROOMS.items() if r.get('last_access',r.get('created',0)) < cutoff]
+    for code in dead: ROOMS.pop(code,None)
+    return len(dead)
+
+def save_rooms():
+    try:
+        STATE_FILE.parent.mkdir(parents=True,exist_ok=True)
+        tmp=STATE_FILE.with_suffix(STATE_FILE.suffix+'.tmp')
+        tmp.write_text(json.dumps(ROOMS,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
+        tmp.replace(STATE_FILE)
+    except Exception:
+        pass
+
+def load_rooms():
+    if not STATE_FILE.exists(): return
+    try:
+        data=json.loads(STATE_FILE.read_text(encoding='utf-8'))
+        if isinstance(data,dict):
+            ROOMS.update(data)
+            cleanup_rooms()
+    except Exception:
+        pass
+
+def public_origin(headers):
+    proto=(headers.get('X-Forwarded-Proto') or 'http').split(',')[0].strip()
+    host=(headers.get('X-Forwarded-Host') or headers.get('Host') or f'localhost:{PORT}').split(',')[0].strip()
+    return f'{proto}://{host}'
+
+def make_room(host_name):
+    code=room_code()
+    while code in ROOMS: code=room_code()
+    pid=uid(); token=auth_token()
+    ROOMS[code]={
+        'code':code,'host_pid':pid,'created':now(),'last_access':now(),'phase':'lobby','game_id':None,'players':{},'assignments':{},'pending':{},'submissions':{},'votes':{},
+        'settings':{'spice':'mild','touch':False,'drink':False,'dating':False,'verification':True,'tempo':'brisk'},'used':{},'history':[],'round_no':0,
+        'public':{'event_title':'로비','event_text':'게임을 선택하세요.','story':None,'special':None},'game_data':{},'paused':False,'deadline':None,'interaction_deadline':None,'phase_started':now(),'result':None,
+    }
+    add_player(ROOMS[code],pid,host_name,True,token)
+    return code,pid,token
+
+def add_player(room,pid,name,host=False,token=None):
+    base=(name or '참가자').strip()[:12] or '참가자'
+    existing={p['name'] for p in room['players'].values()}
+    final=base; n=2
+    while final in existing:
+        suffix=f' {n}'; final=(base[:max(1,12-len(suffix))]+suffix); n+=1
+    room['players'][pid]={'id':pid,'token':token or auth_token(),'name':final,'host':host,'score':0,'active':True,'alive':True,'last_seen':now(),'metrics':{'missions':0,'wins':0,'eliminations':0,'betrayals':0}}
+
+def lan_ip():
+    try:
+        s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.connect(('8.8.8.8',80));ip=s.getsockname()[0];s.close();return ip
+    except Exception:
+        try:return socket.gethostbyname(socket.gethostname())
+        except:return '127.0.0.1'
+
+def authenticated_player(room,pid,token):
+    p=room.get('players',{}).get(pid)
+    return p if p and token and secrets.compare_digest(str(p.get('token','')), str(token)) else None
+
+def state_for(room,pid,origin=None):
+    before=(room.get('phase'),room.get('public',{}).get('event_text'),room.get('deadline'),len(room.get('history',[])))
+    tick(room)
+    after=(room.get('phase'),room.get('public',{}).get('event_text'),room.get('deadline'),len(room.get('history',[])))
+    if after!=before: save_rooms()
+    room['last_access']=now()
+    if pid in room['players']: room['players'][pid]['last_seen']=now()
+    ass=room['assignments'].get(pid)
+    if ass:
+        ass=json.loads(json.dumps(ass,ensure_ascii=False))
+        if room.get('game_id')=='bomb' and ass.get('role')=='💣 폭탄 보유' and ass.get('extra',{}).get('reveal_after',0)>now():
+            ass={'role':'안전','mission':'폭탄 상태를 확인 중입니다. 잠시 뒤 휴대폰이 진동할 수 있습니다.','target':None,'extra':{'hidden_bomb':True,'reveal_after':ass['extra']['reveal_after']}}
+    pending=[{'id':k,'from':room['players'][v['from']]['name'],'detail':v['detail'],'kind':v['kind']} for k,v in room['pending'].items() if v['target']==pid]
+    players=[{'id':p['id'],'name':p['name'],'host':p['host'],'score':p['score'],'active':p['active'],'alive':p['alive']} for p in room['players'].values()]
+    remaining=None
+    if room.get('deadline'):
+        remaining=room['pause_remaining'] if room.get('paused') and room.get('pause_remaining') is not None else max(0,room['deadline']-now())
+    interaction_remaining=max(0,room['interaction_deadline']-now()) if room.get('interaction_deadline') else None
+    result=None
+    if room.get('result'):
+        w=room['result'].get('winner'); result={'winner':room['players'][w]['name'] if w else None,'title':room['result']['title'],'game_points':room['result'].get('game_points',{})}
+    today=compute_today(room)
+    me=room['players'].get(pid)
+    host_url=f'{origin or f"http://{lan_ip()}:{PORT}"}/?room={room["code"]}'
+    return {
+        'room':room['code'],'phase':room['phase'],'game_id':room['game_id'],'game':GAMES.get(room['game_id']),'games':public_games(),'players':players,'me':{'id':pid,'name':me['name'],'host':me['host'],'score':me['score']} if me else None,
+        'settings':room['settings'],'assignment':ass,'pending':pending,'public':room['public'],'round_no':room['round_no'],'round_result':room.get('round_result'),
+        'remaining':remaining,'interaction_remaining':interaction_remaining,'paused':room.get('paused',False),'result':result,'today':today,'join_url':host_url,
+        'game_data_public':public_game_data(room,pid),'server_time':now(),'app_version':'player-first-final-4.0',
