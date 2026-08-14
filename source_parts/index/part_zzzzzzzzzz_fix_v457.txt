@@ -1,0 +1,24 @@
+<style>
+/* v4.5.7 review fixes */
+.mafiaReady457{min-height:72vh;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:20px}.mafiaReadyRole457{font-size:42px;font-weight:1000;letter-spacing:-.04em;margin:10px 0}.mafiaReadyMission457{font-size:15px;line-height:1.55;color:var(--muted);max-width:520px}.mafiaReadyTimer457{font-size:54px;font-weight:1000;margin-top:20px}
+</style>
+<script>
+// Avoid forcing the viewport back to the top on every 850ms polling render.
+// Only scroll when the actual view changes.
+let _v457CurrentView=null;
+view=function(id){
+ document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+ let el=$(id);if(el)el.classList.add('on');
+ if(_v457CurrentView!==id){window.scrollTo(0,0);_v457CurrentView=id}
+ if(!['play','countdown'].includes(id))releaseWakeLock();
+};
+
+const _v457RenderCountdown=renderCountdown;
+renderCountdown=function(){
+ if(S?.game_id!=='mafia')return _v457RenderCountdown();
+ view('countdown');requestWakeLock();
+ let a=S.assignment||{},rem=Math.max(0,Math.ceil(localRemaining('remaining'))),box=document.querySelector('#countdown .countWrap');
+ if(box)box.innerHTML=`<div class="mafiaReady457"><div class="eyebrow">YOUR SECRET ROLE</div><div class="mafiaReadyRole457">${esc(a.role||'역할 확인')}</div><div class="mafiaReadyMission457">${esc(a.mission||'곧 게임이 시작됩니다. 역할과 진행 방식을 확인하세요.')}</div><div class="mafiaReadyTimer457">${rem}</div><div class="sub">이 화면은 다른 사람에게 보여주지 마세요.</div></div>`;
+ updateLiveTimers();
+};
+</script>
