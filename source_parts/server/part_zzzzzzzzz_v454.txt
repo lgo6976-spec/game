@@ -1,4 +1,4 @@
-# v4.5.4: Mafia discussion fuel — partial evidence, bluff cards, and discussion prompts.
+# v4.5.4: Mafia discussion fuel — truthful partial evidence for town, bluff cards for Mafia.
 
 MAFIA_DISCUSSION_TASKS=[
     '단서를 바로 공개하지 말고 먼저 한 사람의 알리바이를 물어보세요.',
@@ -6,8 +6,107 @@ MAFIA_DISCUSSION_TASKS=[
     '한 사람을 잠정적으로 두둔한 뒤 다른 사람들의 반응을 관찰하세요.',
     '누가 밤 행동을 했을지 한 명을 지목하고 이유를 요구하세요.',
     '당신의 단서와 맞지 않는 말을 한 사람이 있는지 끝까지 확인하세요.',
-    '처음 20초는 듣기만 하고, 마지막에 가장 수상한 주장 하나를 짚으세요.',
+    '처음 20초는 듣기만 하고 마지막에 가장 수상한 주장 하나를 짚으세요.',
 ]
 
-def mafia_team(pid,room):
-    return 'ma
+def _mafia_name(room,pid):
+    return room.get('players',{}).get(pid,{}).get('name','?')
+
+def _mafia_role(room,pid):
+    return (room.get('assignments',{}).get(pid) or {}).get('role','시민')
+
+def _mafia_sample_with_truth(room,truth_pid,size=3,exclude=None):
+    exclude=set(exclude or []);alive=[p for p in mafia_alive(room) if p not in exclude]
+    others=[p for p in alive if p!=truth_pid];random.shuffle(others)
+    out=[truth_pid]+others[:max(0,size-1)];random.shuffle(out);return out
+
+def _mafia_make_true_clue(room,viewer):
+    gd=room['game_data'];day=int(gd.get('mafia_day',1));alive=mafia_alive(room);maf=[p for p in alive if _mafia_role(room,p)=='마피아']
+    if not maf:return '현재 살아있는 마피아에 대한 추가 단서가 없습니다.'
+    # Day 1 deliberately gives a wider set. Later days narrow to two people.
+    width=3 if day<=1 and len(alive)>=5 else 2
+    truth=random.choice(maf);cands=_mafia_sample_with_truth(room,truth,min(width,len(alive)),exclude={viewer} if len(alive)>width else set())
+    names=' / '.join(_mafia_name(room,p) for p in cands)
+    templates=[
+        f'정보 조각: {names} 중 적어도 한 명은 마피아입니다.',
+        f'관찰 기록: {names} 중에는 마피아가 포함되어 있습니다.',
+        f'불완전한 제보: {names}를 우선 의심해 볼 가치가 있습니다. 이 중 최소 한 명은 마피아입니다.',
+    ]
+    return random.choice(templates)
+
+def _mafia_make_special_clue(room,viewer):
+    gd=room['game_data'];role=_mafia_role(room,viewer);actions=gd.get('mafia_actions',{})
+    if role=='경찰':
+        # Exact police result is already appended when the night resolves.
+        return '경찰 정보: 조사 결과는 개인 기록에 별도로 남습니다. 공개 시점을 신중하게 고르세요.'
+    if role=='의사':
+        protected=actions.get(viewer);killed=gd.get('mafia_last_kill_target');saved=bool(protected and killed and protected==killed)
+        if protected:
+            return ('의사 정보: 어젯밤 당신의 보호가 실제 공격을 막았습니다.' if saved else '의사 정보: 어젯밤 보호 대상에게 직접적인 공격 흔적은 확인되지 않았습니다.')
+    return _mafia_make_true_clue(room,viewer)
+
+def _mafia_make_bluff_card(room,viewer):
+    alive=[p for p in mafia_alive(room) if p!=viewer];town=[p for p in alive if _mafia_role(room,p)!='마피아']
+    # Give Mafia a plausible statement to build a lie around. It is explicitly a bluff aid, not server-confirmed truth.
+    if town:
+        fake=random.choice(town);pool=[fake]+random.sample([p for p in alive if p!=fake],min(2,max(0,len(alive)-1)));random.shuffle(pool);names=' / '.join(_mafia_name(room,p) for p in pool)
+        return f'위장 카드: “{names} 중 마피아가 있다는 단서를 받았다”고 주장해 볼 수 있습니다. 사실 여부는 당신에게 달려 있습니다.'
+    return '위장 카드: 시민처럼 불완전한 단서를 받은 척하며 토론에 섞이세요.'
+
+def _mafia_assign_day_info(room):
+    gd=room['game_data'];day=int(gd.get('mafia_day',1))
+    for p in mafia_alive(room):
+        ass=room['assignments'].get(p) or {};role=ass.get('role');extra=ass.setdefault('extra',{})
+        extra['discussion_task']=random.choice(MAFIA_DISCUSSION_TASKS)
+        if role=='마피아':
+            extra['day_evidence']=_mafia_make_bluff_card(room,p)
+        else:
+            extra['day_evidence']=_mafia_make_special_clue(room,p)
+        append_private_notice(room,p,f'{day}일차 토론 단서 · '+extra['day_evidence'])
+        append_private_notice(room,p,'토론 행동 · '+extra['discussion_task'])
+
+def resolve_mafia_night(room):
+    gd=room['game_data'];actions=gd.get('mafia_actions',{});alive=mafia_alive(room);maf=[p for p in alive if _mafia_role(room,p)=='마피아'];kills=[actions[p] for p in maf if p in actions]
+    kill=None
+    if kills:
+        c=Counter(kills);mx=max(c.values());kill=random.choice([p for p,v in c.items() if v==mx])
+    gd['mafia_last_kill_target']=kill
+    doctor=next((p for p in alive if _mafia_role(room,p)=='의사'),None);saved=actions.get(doctor) if doctor else None
+    if doctor and saved:gd['doctor_last_target']=saved
+    police=next((p for p in alive if _mafia_role(room,p)=='경찰'),None)
+    if police and police in actions:
+        t=actions[police];is_maf=_mafia_role(room,t)=='마피아';append_private_notice(room,police,f'{gd["mafia_day"]}일차 조사 · {_mafia_name(room,t)}: '+('마피아입니다.' if is_maf else '마피아가 아닙니다.'))
+    if kill and kill!=saved:
+        room['players'][kill]['alive']=False;role=_mafia_role(room,kill);text=f'{_mafia_name(room,kill)}님이 밤에 제거되었습니다. 역할은 {role}였습니다.'
+    else:
+        text='지난밤 아무도 제거되지 않았습니다.'
+    # Give the survivors material before discussion begins.
+    _mafia_assign_day_info(room)
+    room['round_result']={'stage':'mafia_morning','title':'아침','text':text};room['public']['event_title']='☀️ 아침';room['public']['event_text']=text+' 각자 받은 개인 단서를 확인한 뒤 토론하세요.'
+    if mafia_check_win(room):return
+    gd['mafia_stage']='morning';room['interaction_deadline']=now()+9;room['deadline']=room['interaction_deadline']
+
+def start_mafia_discuss(room):
+    gd=room['game_data'];gd['mafia_stage']='discuss';room['round_result']=None;sec=mafia_discussion_seconds(room)
+    room['public']['event_title']=f'{gd["mafia_day"]}일차 토론 · {sec}초'
+    room['public']['event_text']='각자 가진 정보는 서로 다릅니다. 공개할지 숨길지 판단하고, 주장끼리 모순되는 부분을 찾으세요.'
+    room['interaction_deadline']=now()+sec;room['deadline']=room['interaction_deadline'];gd['mafia_discuss_total']=sec;gd['mafia_discuss_warning']=False
+
+_V454_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V454_PUBLIC_GAME_DATA(room,pid);gd=room.get('game_data',{})
+    if room.get('game_id')=='mafia':
+        extra=(room.get('assignments',{}).get(pid) or {}).get('extra',{})
+        out['day_evidence']=extra.get('day_evidence')
+        out['discussion_task']=extra.get('discussion_task')
+    return out
+
+_V454_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V454_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.4';return out
+
+_V454_GET=Handler.do_GET
+def _v454_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.4'})
+    return _V454_GET(self)
+Handler.do_GET=_v454_do_get
