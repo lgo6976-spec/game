@@ -1,0 +1,119 @@
+    elif gid=='infection':
+        count=2 if len(pids)>=10 else 1; infected=set(random.sample(pids,count)); room['game_data']['infected']=list(infected)
+        for pid in pids:
+            if pid in infected: set_infected_assignment(room,pid)
+            else: make_assignment(room,pid,'인간','감염자의 행동을 관찰하고 끝까지 인간으로 생존하세요.')
+    elif gid=='oddq': setup_odd_round(room)
+    elif gid=='forbidden':
+        for i,pid in enumerate(pids):
+            target=pids[(i+1)%len(pids)]
+            make_assignment(room,pid,'유도자',target_mission(room),target)
+    elif gid=='betray':
+        for pid in pids: make_assignment(room,pid,'협상가',random.choice(BETRAY_OBJECTIVES),None,{'ally':None})
+    elif gid=='anon': setup_anon_round(room)
+    elif gid=='choice': setup_choice_round(room)
+    room['phase']='countdown'; room['phase_started']=now(); room['deadline']=now()+5; room['interaction_deadline']=None; room['paused']=False; room['pause_remaining']=None
+
+def set_bomb_assignment(room,holder,delay=False):
+    pids=[p for p in active_pids(room) if p!=holder]
+    if not pids: return
+    target=random.choice(pids); room['game_data']['holder']=holder
+    for pid in active_pids(room):
+        if pid!=holder and room['assignments'].get(pid,{}).get('role')=='💣 폭탄 보유': make_assignment(room,pid,'안전','폭탄이 당신에게 오지 않도록 주변을 의심하세요.')
+    make_assignment(room,holder,'💣 폭탄 보유',target_mission(room),target,{'reveal_after':now()+random.randint(8,15) if delay else now()})
+
+def set_infected_assignment(room,pid):
+    humans=[p for p in active_pids(room) if p not in room['game_data'].get('infected',[]) and p!=pid]
+    if humans:
+        target=random.choice(humans); make_assignment(room,pid,'☣️ 감염자',target_mission(room),target)
+    else: make_assignment(room,pid,'☣️ 감염자','모든 사람이 감염되었습니다. 정체를 숨긴 채 종료를 기다리세요.')
+
+def setup_odd_round(room):
+    pool=list(ODD_PAIRS)
+    if room['settings'].get('spice') in ('spicy','hot'): pool += ODD_SPICY
+    if room['settings'].get('spice')=='hot': pool += ODD_HOT
+    pool=filtered(pool,room['settings'])
+    pair=pick_recent(room,'odd_pairs',pool,lambda x:x[0]+'|'+x[1])
+    pids=active_pids(room); odd=random.choice(pids)
+    room['game_data']['odd']=odd; room['game_data']['pair']=[pair[0],pair[1]]; room['submissions']={}; room['votes']={}; room['round_result']=None
+    for pid in pids:
+        q=pair[1] if pid==odd else pair[0]
+        make_assignment(room,pid,'다른 질문' if pid==odd else '일반 질문',q,None,{'question':q})
+    room['public']['event_title']=f'{room["round_no"]}라운드'; room['public']['event_text']='질문을 공개하지 말고 사람 한 명을 선택하세요.'
+
+def setup_anon_round(room):
+    pool=list(ANON_QUESTIONS)
+    if room['settings'].get('spice') in ('spicy','hot'): pool += ANON_SPICY
+    if room['settings'].get('spice')=='hot': pool += ANON_HOT
+    pool=filtered(pool,room['settings']); q=pick_recent(room,'anon_q',pool,lambda x:x[0])
+    room['game_data']['question']=q[0]; room['submissions']={}; room['round_result']=None
+    for pid in active_pids(room): make_assignment(room,pid,'익명 투표자',q[0])
+    room['public']['event_title']=f'{room["round_no"]}라운드';room['public']['event_text']=q[0]
+
+def setup_choice_round(room):
+    c=pick_recent(room,'choices',CHOICES,lambda x:x['title']);room['game_data']['choice']=c;room['submissions']={};room['round_result']=None
+    for pid in active_pids(room): make_assignment(room,pid,'선택자',c['text'],None,{'a':c['a'],'b':c['b']})
+    room['public']['event_title']=c['title'];room['public']['event_text']=c['text']
+
+def game_duration(room): return GAMES[room['game_id']]['duration']
+def game_player_limits(gid):
+    raw=GAMES[gid]['players'].replace('명','')
+    a,b=raw.split('~',1)
+    return int(a),int(b)
+
+
+def interaction_seconds(room, stage='submit'):
+    gid=room.get('game_id')
+    tempo=room.get('settings',{}).get('tempo','brisk')
+    base={
+        'oddq': {'submit':24,'guess':18,'result':7},
+        'anon': {'submit':25,'result':7},
+        'choice': {'submit':18,'result':7},
+    }.get(gid,{})
+    sec=base.get(stage)
+    if sec is None: return None
+    if tempo=='relaxed': sec=int(sec*1.35)
+    elif tempo=='fast': sec=max(6,int(sec*.78))
+    return sec
+
+def set_interaction_deadline(room, stage):
+    sec=interaction_seconds(room,stage)
+    room['interaction_deadline']=now()+sec if sec else None
+    room['game_data']['interaction_stage']=stage
+
+def enter_play(room):
+    room['phase']='play';room['phase_started']=now();room['deadline']=now()+game_duration(room)
+    room['public']['event_title']='게임 시작';room['public']['event_text']='바로 시작하세요. 화면보다 사람을 보세요.'
+    tempo=room.get('settings',{}).get('tempo','brisk')
+    if room['game_id'] in ('oddq','anon','choice'):
+        set_interaction_deadline(room,'submit')
+    else:
+        room['interaction_deadline']=None
+    span=(55,85) if tempo=='fast' else (70,105) if tempo=='brisk' else (90,130)
+    room['next_auto_event']=now()+random.randint(*span)
+
+def trigger_event(room):
+    gid=room['game_id']
+    if gid=='night':
+        story=room.get('public',{}).get('story') or {}
+        clues=story.get('clues') or []
+        idx=int(room.get('game_data',{}).get('story_clue_idx',0))
+        if idx < len(clues) and random.random() < .34:
+            ev=clues[idx]
+            room['game_data']['story_clue_idx']=idx+1
+            room['public']['event_title']=f'단서 {idx+1}'
+            room['public']['event_text']=ev
+        else:
+            ev=random.choice(NIGHT_EVENTS)
+            room['public']['event_title']='새로운 사건'
+            room['public']['event_text']=ev
+    else:
+        ev=random.choice(GENERAL_EVENTS)
+        room['public']['event_title']='새로운 사건';room['public']['event_text']=ev
+    if '60초 감소' in ev and room.get('deadline'): room['deadline']=max(now()+5,room['deadline']-60)
+    tempo=room.get('settings',{}).get('tempo','brisk')
+    if gid=='night':
+        span=(85,115) if tempo=='fast' else (100,135) if tempo=='brisk' else (120,155)
+    else:
+        span=(55,85) if tempo=='fast' else (70,110) if tempo=='brisk' else (95,145)
+    room['next_auto_event']=now()+random.randint(*span)
