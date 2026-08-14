@@ -1,0 +1,120 @@
+def resolve_choice(room):
+    c=room['game_data']['choice']; subs=room['submissions']; a=[p for p,v in subs.items() if v.get('choice')=='a']; b=[p for p,v in subs.items() if v.get('choice')=='b']
+    text=''
+    if c['rule']=='single_greed':
+        if len(a)==1: score(room,a[0],10); text=f'혼자 욕심을 선택한 {room["players"][a[0]]["name"]}이 10점을 얻었습니다.'
+        elif len(a)>1: text='욕심을 선택한 사람이 여러 명이라 아무도 보상을 받지 못했습니다.'
+        else:
+            for p in b: score(room,p,2)
+            text='모두가 나눔을 선택해 전원 +2점.'
+    elif c['rule']=='cooperate':
+        for p in a: score(room,p,3)
+        if len(b)>=max(2,len(subs)//2):
+            for p in b: score(room,p,5)
+            text='공동 금고가 성립되어 기여자들은 +5점.'
+        else: text='공동 금고 인원이 부족했습니다. 개인 점수만 반영됩니다.'
+    elif c['rule']=='betrayal':
+        if len(b)==1: score(room,b[0],8); text=f'단 한 명의 배신자가 +8점을 가져갑니다.'
+        elif len(b)==0:
+            for p in a: score(room,p,3)
+            text='전원 협력 성공. 모두 +3점.'
+        else:
+            for p in a: score(room,p,1)
+            text='배신자가 너무 많았습니다. 협력자만 +1점.'
+    elif c['rule']=='risk':
+        for p in a: score(room,p,2)
+        winners=[]
+        for p in b:
+            if random.random()<0.5: score(room,p,6);winners.append(room['players'][p]['name'])
+        text='확정 선택은 +2점. 위험 선택 성공: '+(', '.join(winners) if winners else '없음')
+    elif c['rule']=='minority':
+        winners=a if len(a)<len(b) else b if len(b)<len(a) else []
+        for p in winners: score(room,p,5)
+        text='소수 선택자 '+(', '.join(room['players'][p]['name'] for p in winners) if winners else '없음')+' +5점.'
+    else:
+        lowest=min(room['players'][p]['score'] for p in active_pids(room)); lows=[p for p in active_pids(room) if room['players'][p]['score']==lowest]
+        for p in a: score(room,p,3)
+        if b:
+            tgt=random.choice(lows); score(room,tgt,6)
+        text='개인 선택은 +3점, 도움 선택이 있으면 현재 꼴찌 중 한 명에게 +6점.'
+    room['round_result']={'title':'선택 결과','text':text,'counts':{'a':len(a),'b':len(b)}}
+    room['public']['event_title']='선택 공개';room['public']['event_text']=text
+    set_interaction_deadline(room,'result')
+
+def resolve_anon(room):
+    subs=room['submissions']; cnt=Counter(v['target'] for v in subs.values()); top=cnt.most_common()
+    reasons=[{'target':room['players'][v['target']]['name'],'reason':v.get('reason','')} for v in subs.values() if v.get('reason')]
+    random.shuffle(reasons); reasons=reasons[:3]
+    if top:
+        maxc=top[0][1]; majority={pid for pid,c in top if c==maxc}
+        for voter,v in subs.items():
+            if v['target'] in majority: score(room,voter,1)
+    room['round_result']={'title':'익명 결과','counts':[{'name':room['players'][pid]['name'],'count':c} for pid,c in top],'reasons':reasons}
+    room['public']['event_title']='투표 결과';room['public']['event_text']='익명 결과가 공개되었습니다.'
+    set_interaction_deadline(room,'result')
+
+def resolve_odd_answers(room):
+    subs=room['submissions'];cnt=Counter(v['target'] for v in subs.values())
+    room['round_result']={'stage':'guess','answers':[{'player':room['players'][pid]['name'],'target':room['players'][v['target']]['name'],'reason':v.get('reason','')} for pid,v in subs.items()], 'counts':[{'name':room['players'][p]['name'],'count':c} for p,c in cnt.most_common()]}
+    room['votes']={};room['public']['event_title']='다른 질문 찾기';room['public']['event_text']='답과 이유를 보고 바로 한 명을 선택하세요.'
+    set_interaction_deadline(room,'guess')
+
+def resolve_odd_guess(room):
+    odd=room['game_data']['odd']; correct=[]
+    for voter,suspect in room['votes'].items():
+        if suspect==odd: score(room,voter,2);correct.append(room['players'][voter]['name'])
+    caught=sum(1 for s in room['votes'].values() if s==odd)
+    if caught < max(1,len(room['votes'])//2): score(room,odd,3)
+    room['round_result']['stage']='done';room['round_result']['odd_name']=room['players'][odd]['name'];room['round_result']['correct']=correct
+    room['public']['event_title']='정답 공개';room['public']['event_text']=f'다른 질문을 받은 사람은 {room["players"][odd]["name"]}.'
+    set_interaction_deadline(room,'result')
+
+def next_round(room):
+    if room['round_no']>=3:
+        finish_game(room); return
+    room['round_no']+=1
+    if room['game_id']=='oddq': setup_odd_round(room)
+    elif room['game_id']=='anon': setup_anon_round(room)
+    elif room['game_id']=='choice': setup_choice_round(room)
+    set_interaction_deadline(room,'submit')
+
+def finish_game(room):
+    gid=room['game_id']
+    if gid=='bomb':
+        holder=room['game_data'].get('holder');
+        if holder: score(room,holder,-3);add_metric(room,holder,'bomb_end',1)
+    if gid=='infection':
+        infected=set(room['game_data'].get('infected',[])); humans=[p for p in active_pids(room) if p not in infected]
+        winners=humans if humans else list(infected)
+        for p in winners: score(room,p,3)
+    if gid=='night' and not room.get('round_result'):
+        room['public']['event_title']='최종 투표';room['public']['event_text']='아직 최종 투표가 완료되지 않아 현재 점수로 종료합니다.'
+    starts=room.get('game_data',{}).get('start_scores',{})
+    game_points={p:room['players'][p]['score']-starts.get(p,room['players'][p]['score']) for p in active_pids(room)}
+    maxscore=max(list(game_points.values()) or [0]); winners=[p for p,v in game_points.items() if v==maxscore]
+    winner=random.choice(winners) if winners else None
+    if winner: add_metric(room,winner,'wins',1)
+    room['history'].append({'game':gid,'winner':winner,'at':now(),'game_points':game_points})
+    room['phase']='result';room['deadline']=None;room['paused']=False
+    room['result']={'winner':winner,'title':GAMES[gid]['title'],'game_points':game_points}
+
+
+def auto_advance_interaction(room):
+    gid=room.get('game_id')
+    stage=room.get('game_data',{}).get('interaction_stage')
+    if gid not in ('oddq','anon','choice') or not stage: return
+    pids=active_pids(room)
+    if stage=='submit':
+        # 시간 초과자는 자동 기권 처리한다. 가짜 선택을 만들어 결과를 왜곡하지 않는다.
+        if gid=='oddq': resolve_odd_answers(room)
+        elif gid=='anon': resolve_anon(room)
+        elif gid=='choice': resolve_choice(room)
+    elif stage=='guess' and gid=='oddq':
+        resolve_odd_guess(room)
+    elif stage=='result':
+        next_round(room)
+
+def expire_pending(room):
+    expired=[]
+    for pend_id,p in room.get('pending',{}).items():
+        if p.get('deadline') and now()>=p['deadline']:
