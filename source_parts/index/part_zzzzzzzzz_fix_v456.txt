@@ -1,0 +1,56 @@
+<style>
+/* v4.5.6 game picker */
+.gamePickerHead{grid-column:1/-1;border:1px solid var(--line);background:linear-gradient(145deg,var(--panel2),var(--panel));border-radius:18px;padding:14px 15px;margin-bottom:2px}.gamePickerHead strong{font-size:18px}.gamePickerHead .sub{margin-top:4px}.gamePickerLegend{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.gameCard456{display:flex;flex-direction:column;min-height:255px;transition:transform .12s,border-color .12s,opacity .12s}.gameCard456:active{transform:scale(.992)}.gameCard456.unavailable{opacity:.52}.gameCard456.recommended{border-color:#595182;box-shadow:0 0 0 1px rgba(117,104,248,.12),var(--shadow)}.gameCardTop456{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.gameEmoji456{font-size:29px;line-height:1}.gameTitleWrap456{display:flex;gap:9px;align-items:center}.gameStatus456{font-size:10px;font-weight:950;padding:5px 8px;border-radius:999px;white-space:nowrap}.gameStatus456.ok{background:rgba(57,207,157,.11);border:1px solid rgba(57,207,157,.35);color:#8ce8c8}.gameStatus456.no{background:rgba(255,103,109,.09);border:1px solid rgba(255,103,109,.25);color:#ffb0b5}.gameType456{font-size:11px;font-weight:950;color:#d7d2ff;margin-top:3px}.gameMeta456{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:11px 0}.gameMetaItem456{padding:9px 8px;border-radius:12px;background:#10151e;border:1px solid #2d3646}.gameMetaItem456 span{display:block;font-size:9px;font-weight:900;color:var(--muted);margin-bottom:3px}.gameMetaItem456 b{font-size:11px;line-height:1.3}.gameDesc456{font-size:12.5px;line-height:1.55;color:var(--muted);margin:0 0 10px;flex:1}.gameFeel456{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}.gameFeel456 .tag{background:#151b25}.gameWhy456{font-size:10.5px;line-height:1.45;color:#b9c3d2;margin-bottom:9px}.gameCard456 .btn[disabled]{cursor:not-allowed;opacity:.55}.gamePickerSection{grid-column:1/-1;font-size:12px;font-weight:950;color:#b7c1d0;margin:8px 2px 0}
+/* mafia host pacing controls */
+.mafiaHostPace456{display:flex;gap:7px;width:100%;margin-top:8px}.mafiaHostPace456 .btn{flex:1;min-height:42px;font-size:11px}.mafiaDefenseTurn456{padding:11px 12px;border-radius:14px;background:#171625;border:1px solid #3b3659;margin-bottom:9px;font-size:12px;line-height:1.45}.mafiaDefenseTurn456 b{font-size:15px}
+@media(max-width:520px){.gameMeta456{grid-template-columns:1fr 1fr 1fr}.gameCard456{min-height:0}}
+</style>
+<script>
+function gamePlayerRange456(txt){let m=String(txt||'').match(/(\d+)\s*[~～-]\s*(\d+)/);if(m)return [Number(m[1]),Number(m[2])];let n=Number((String(txt||'').match(/\d+/)||[])[0]);return n?[n,n]:[1,99]}
+function gameKind456(g){let map={
+ bounty:'타깃 심리전',night:'스토리 추리',secret:'잠입 미션',bomb:'긴장·순발력',infection:'팀 생존 추리',oddq:'대화 추리',forbidden:'장기 눈치전',betray:'협상 전략',anon:'익명 친목',choice:'심리 딜레마',quiz:'상식 퀴즈',match:'취향 싱크',number:'눈치 숫자',bluff:'블러핑',chosung:'초성 스피드',teamsync:'팀 대항전',reaction:'반응속도',mafia:'정통 마피아'};return map[g.id]||g.cat||'파티게임'}
+function gameFeel456(g){let map={
+ bounty:['메인게임','대화 많음'],night:['메인게임','몰입형'],secret:['가볍게','움직임'],bomb:['빠른 템포','긴장감'],infection:['메인게임','추리'],oddq:['아이스브레이킹','웃김'],forbidden:['배경형','오래 하기'],betray:['전략','협상'],anon:['친목','익명'],choice:['짧게','심리'],quiz:['퀴즈','경쟁'],match:['2~8명','취향'],number:['짧게','눈치'],bluff:['소수 정예','거짓말'],chosung:['빠르게','단어'],teamsync:['팀전','여러 종목'],reaction:['초단기','순발력'],mafia:['메인게임','토론·추리']};return map[g.id]||[paceTag(g),g.cat]}
+function gameWhy456(g,n){let map={
+ mafia:n<=6?'5~6명에 맞춰 단서와 토론 밸런스를 별도 조정했습니다.':'인원이 많을수록 심리전이 깊어집니다.',
+ reaction:'설명 없이 바로 시작하기 좋은 워밍업 게임입니다.',
+ oddq:'처음 모인 사람끼리도 바로 말이 나오기 좋습니다.',
+ match:'서로 취향을 알아가는 가벼운 시작용입니다.',
+ bounty:'한 판을 길게 몰입해서 하기 좋은 메인 게임입니다.',
+ night:'스토리와 역할극을 좋아하면 가장 몰입감이 큽니다.',
+ bomb:'짧은 시간에 긴장감을 확 올리기 좋습니다.',
+ teamsync:'개인전보다 팀으로 떠들고 경쟁하고 싶을 때 적합합니다.'};return map[g.id]||''}
+function renderGames(){
+ view('games');let n=S.players.filter(p=>p.active).length;
+ let arr=S.games.map(g=>{let [min,max]=gamePlayerRange456(g.players);return {g,min,max,ok:n>=min&&n<=max}}).sort((a,b)=>(b.ok-a.ok)||(a.g.rank-b.g.rank));
+ let okCount=arr.filter(x=>x.ok).length;
+ let html=`<div class="gamePickerHead"><strong>지금 ${n}명 · ${okCount}개 게임 플레이 가능</strong><div class="sub">인원에 맞는 게임을 먼저 보여줍니다. 카드만 보고도 유형과 예상 흐름을 비교할 수 있습니다.</div><div class="gamePickerLegend"><span class="tag">👥 인원</span><span class="tag">⏱ 예상시간</span><span class="tag">🎮 게임유형</span><span class="tag">✨ 플레이감</span></div></div>`;
+ let seenUnavailable=false;
+ arr.forEach(({g,min,max,ok},idx)=>{
+   if(!ok&&!seenUnavailable){seenUnavailable=true;html+=`<div class="gamePickerSection">현재 인원으로는 플레이할 수 없는 게임</div>`}
+   let feel=gameFeel456(g),kind=gameKind456(g),why=gameWhy456(g,n),recommended=ok&&idx<4;
+   html+=`<div class="game gameCard456 ${ok?'':'unavailable'} ${recommended?'recommended':''}">
+    <div class="gameCardTop456"><div class="gameTitleWrap456"><div class="gameEmoji456">${esc(g.emoji||'🎮')}</div><div><div class="rank">${recommended?'지금 인원 추천 · ':''}추천 ${g.rank}위</div><div class="gameName">${esc(g.title)}</div><div class="gameType456">${esc(kind)}</div></div></div><span class="gameStatus456 ${ok?'ok':'no'}">${ok?'지금 가능':n<min?`${min-n}명 더 필요`:`최대 ${max}명`}</span></div>
+    <div class="gameMeta456"><div class="gameMetaItem456"><span>인원</span><b>${esc(g.players)}</b></div><div class="gameMetaItem456"><span>예상 시간</span><b>${esc(g.time)}</b></div><div class="gameMetaItem456"><span>분류</span><b>${esc(g.cat)}</b></div></div>
+    <div class="gameDesc456">${esc(g.desc)}</div>
+    <div class="gameFeel456">${feel.map(x=>`<span class="tag">${esc(x)}</span>`).join('')}</div>
+    ${why?`<div class="gameWhy456">${esc(why)}</div>`:''}
+    ${isHost()?`<button class="btn ${recommended?'primary':'secondary'} full" ${ok?'':'disabled'} onclick="${ok?`act('select_game',{game_id:'${g.id}'})`:''}">${ok?'이 게임 선택':'현재 인원 플레이 불가'}</button>`:`<div class="sub">${ok?'방장이 게임을 고르는 중':'현재 인원으로 플레이 불가'}</div>`}
+   </div>`;
+ });
+ $('gamesGrid').innerHTML=html;
+}
+
+const _v456RenderMafiaUI=renderMafiaUI;
+renderMafiaUI=function(){
+ _v456RenderMafiaUI();if(S?.game_id!=='mafia')return;let gd=S.game_data_public||{},stage=gd.mafia_stage,d=$('privateActions'),m=$('minorActions');
+ if(stage==='defense'&&gd.defense_candidate){let mine=gd.defense_candidate===S.me.id,name=nameOf(gd.defense_candidate);d.innerHTML=`<div class="mafiaDefenseTurn456"><b>${mine?'지금 당신 차례입니다':esc(name)+'님의 최후변론'}</b><br>${mine?'15초 동안 핵심 주장과 단서를 정리하세요.':'15초 동안 듣기만 하고 투표 판단을 정리하세요.'}</div>`+mafiaEvidenceBlock()}
+ if(stage==='discuss'&&isHost()){
+   let buttons='';if(gd.can_skip_discussion)buttons+=`<button class="btn ghost" onclick="act('mafia_skip_discussion')">바로 지목하기</button>`;if(gd.can_extend_discussion)buttons+=`<button class="btn secondary" onclick="act('mafia_extend_discussion')">+1분 연장</button>`;
+   if(buttons)m.innerHTML=`<div class="mafiaHostPace456">${buttons}</div>`;else if(gd.discussion_extended)m.innerHTML='<div class="sub">오늘 토론 연장 사용 완료</div>';
+ }
+};
+
+const _v456RenderPlay=renderPlay;
+renderPlay=function(){_v456RenderPlay();if(S?.game_id!=='mafia')return;let gd=S.game_data_public||{};if(gd.mafia_stage==='defense'&&gd.defense_total){$('roundText').textContent=`${gd.mafia_day||1}일차 · 최후변론 ${Number(gd.defense_index||0)+1}/${gd.defense_total}`}}
+</script>
