@@ -1,0 +1,33 @@
+# v4.5.2: mafia role balance by player count
+_V452_SETUP_MAFIA=setup_mafia
+def setup_mafia(room):
+    pids=shuffled_active(room);n=len(pids)
+    # 5: M1 / Police1 / Citizen3
+    # 6: M1 / Police1 / Doctor1 / Citizen3
+    # 7-10: M2 / Police1 / Doctor1 / rest Citizens
+    # 11-12: M3 / Police1 / Doctor1 / rest Citizens
+    mcount=1 if n<=6 else 2 if n<=10 else 3
+    roles=['마피아']*mcount
+    if n>=5:roles.append('경찰')
+    if n>=6:roles.append('의사')
+    roles+=['시민']*(n-len(roles))
+    random.shuffle(roles);room['assignments']={};room['pending']={};room['submissions']={};room['votes']={};room['round_result']=None;room['round_no']=1
+    for p,r in zip(pids,roles):
+        room['players'][p]['alive']=True
+        make_assignment(room,p,r,'밤이 되면 역할에 맞는 행동을 하세요.' if r!='시민' else '낮 토론에서 마피아를 찾아내세요.',None,{'mafia_notice':''})
+    maf=[p for p in pids if room['assignments'][p]['role']=='마피아']
+    for p in maf:
+        mates=[room['players'][x]['name'] for x in maf if x!=p]
+        append_private_notice(room,p,'마피아 팀: '+(', '.join(mates) if mates else '당신 혼자입니다.'))
+    room['game_data']={'start_scores':{p:room['players'][p]['score'] for p in pids},'mafia_day':1,'mafia_stage':'ready','mafia_actions':{},'doctor_last_target':None,'role_summary':Counter(roles)}
+    room['public']={'event_title':'마피아 준비','event_text':'역할은 자기 화면만 확인하세요.','story':None,'special':None};room['phase']='countdown';room['phase_started']=now();room['deadline']=now()+5;room['interaction_deadline']=None;room['paused']=False;room['pause_remaining']=None;room['paused_at']=None
+
+_V452_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V452_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.2';return out
+
+_V452_GET=Handler.do_GET
+def _v452_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.2'})
+    return _V452_GET(self)
+Handler.do_GET=_v452_do_get
