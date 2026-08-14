@@ -1,0 +1,120 @@
+
+# ---------- Player-First Content Pack v3 ----------
+from content_pack_v3 import (
+    BOUNTY_PHRASES, BOUNTY_ACTIONS, BOMB_PHRASES, BOMB_ACTIONS,
+    INFECTION_PHRASES, INFECTION_ACTIONS, FORBIDDEN_PHRASES, FORBIDDEN_ACTIONS,
+    SECRET_MISSIONS, NIGHT_MISSIONS, STORIES_V3, NIGHT_EVENTS_V3,
+    ODD_PAIRS_V3, ODD_SPICY_V3, ODD_HOT_V3, STORY_CLUES_V3,
+)
+
+# v3는 기존 샘플과 섞지 않고 품질 검토를 거친 콘텐츠 팩을 우선 사용한다.
+STORIES = STORIES_V3
+NIGHT_EVENTS = NIGHT_EVENTS_V3
+ODD_PAIRS = ODD_PAIRS_V3
+ODD_SPICY = ODD_SPICY_V3
+ODD_HOT = ODD_HOT_V3
+
+
+def now(): return time.time()
+def uid(): return uuid.uuid4().hex[:12]
+def auth_token(): return secrets.token_urlsafe(24)
+def room_code(): return ''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
+def public_games(): return [{**v,'id':k} for k,v in sorted(GAMES.items(), key=lambda kv: kv[1]['rank'])]
+def active_pids(room): return [pid for pid,p in room['players'].items() if p.get('active',True)]
+def filtered(items, settings):
+    banned=set()
+    if settings.get('touch'): banned.add('touch')
+    if settings.get('drink'): banned.add('drink')
+    if settings.get('dating'): banned.add('dating')
+    return [x for x in items if not (set(x[-1]) & banned)]
+def pick_recent(room,key,seq,identity=lambda x:x):
+    if not seq: return None
+    used=room['used'].setdefault(key,[])
+    candidates=[x for x in seq if str(identity(x)) not in used]
+    if not candidates:
+        keep=max(1,len(used)//3)
+        room['used'][key]=used[-keep:]
+        used=room['used'][key]
+        candidates=[x for x in seq if str(identity(x)) not in used] or list(seq)
+    x=random.choice(candidates)
+    used.append(str(identity(x)))
+    max_keep=min(80,max(10,len(seq)*2))
+    if len(used)>max_keep: room['used'][key]=used[-max_keep:]
+    return x
+
+def target_mission(room, kind=None, gid=None):
+    """게임 속도에 맞는 전용 미션 풀에서 최근 중복을 피해서 하나를 고른다."""
+    gid = gid or room.get('game_id') or 'bounty'
+    pools = {
+        'bounty': (BOUNTY_PHRASES, BOUNTY_ACTIONS, .45),
+        'bomb': (BOMB_PHRASES, BOMB_ACTIONS, .58),
+        'infection': (INFECTION_PHRASES, INFECTION_ACTIONS, .38),
+        'forbidden': (FORBIDDEN_PHRASES, FORBIDDEN_ACTIONS, .48),
+    }
+    phrases, actions, say_ratio = pools.get(gid, (BOUNTY_PHRASES, BOUNTY_ACTIONS, .45))
+    if kind is None:
+        kind = 'say' if random.random() < say_ratio else 'action'
+    if kind == 'say':
+        phrase = pick_recent(room, f'{gid}_phrases', phrases, lambda x:x)
+        return f'상대가 “{phrase}”라고 말하게 하세요.'
+    pool = filtered(actions, room['settings'])
+    x = pick_recent(room, f'{gid}_actions', pool, lambda a:a[0])
+    return x[0]
+
+def self_mission(room, gid=None):
+    gid = gid or room.get('game_id') or 'secret'
+    pool = NIGHT_MISSIONS if gid == 'night' else SECRET_MISSIONS
+    pool = filtered(pool, room['settings'])
+    x = pick_recent(room, f'{gid}_self_missions', pool, lambda a:a[0])
+    return x[0]
+
+def add_metric(room,pid,key,n=1):
+    p=room['players'].get(pid)
+    if p: p['metrics'][key]=p['metrics'].get(key,0)+n
+
+def score(room,pid,n):
+    if pid in room['players']: room['players'][pid]['score'] += n
+
+def shuffled_active(room):
+    p=active_pids(room)[:]; random.shuffle(p); return p
+
+def make_assignment(room,pid,role='플레이어',mission='',target=None,extra=None):
+    merged={'rerolls_left':1}
+    merged.update(extra or {})
+    room['assignments'][pid]={'role':role,'mission':mission,'target':target,'extra':merged}
+
+def select_story(room):
+    s=pick_recent(room,'stories',STORIES,lambda x:x[0])
+    return {'title':s[0],'hook':s[1],'twist':s[2],'clues':STORY_CLUES_V3.get(s[0],[])}
+
+def setup_game(room, replay=False):
+    gid=room['game_id']; pids=shuffled_active(room); room['assignments']={}; room['pending']={}; room['submissions']={}; room['votes']={}; room['round_result']=None
+    room['round_no']=1
+    room['public']={'event_title':'게임 준비','event_text':'각자의 비밀 정보를 확인하세요.','story':None,'special':None}
+    room['game_data']={'start_scores':{pid:room['players'][pid]['score'] for pid in pids}}
+    for pid in pids:
+        room['players'][pid]['alive']=True
+    if gid=='bounty':
+        for i,pid in enumerate(pids):
+            target=pids[(i+1)%len(pids)]
+            make_assignment(room,pid,'사냥꾼',target_mission(room),target)
+        room['game_data']['ring']=pids
+    elif gid=='night':
+        story=select_story(room); room['public']['story']=story; room['game_data']['story_clue_idx']=0
+        roles=['생존자']*len(pids); roles[0]='범인'
+        if len(pids)>=7: roles[1]='조사자'
+        if len(pids)>=9: roles[2]='정보원'
+        random.shuffle(roles)
+        for pid,role in zip(pids,roles):
+            extra={}
+            if role=='조사자': extra={'investigation_used':False}
+            elif role=='정보원': extra={'private_notice':'스토리의 숨은 단서: '+story['twist']}
+            elif role=='범인': extra={'private_notice':'정체를 숨기고 개인 지령을 수행하세요. 최종 투표에서 살아남아야 합니다.'}
+            make_assignment(room,pid,role,self_mission(room),None,extra)
+        room['game_data']['criminals']=[pid for pid in pids if room['assignments'][pid]['role']=='범인']
+    elif gid=='secret':
+        for pid in pids: make_assignment(room,pid,'요원',self_mission(room))
+    elif gid=='bomb':
+        holder=random.choice(pids); room['game_data']['holder']=holder
+        for pid in pids: make_assignment(room,pid,'안전','폭탄이 당신에게 오지 않도록 주변을 의심하세요.')
+        set_bomb_assignment(room,holder)
