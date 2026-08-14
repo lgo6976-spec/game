@@ -1,0 +1,47 @@
+<style>
+.smallChoiceGrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.smallChoice{min-height:66px;border:1px solid var(--line);border-radius:16px;background:var(--soft);color:var(--text);font-weight:900;font-size:15px;padding:12px;line-height:1.25}.smallChoice.primaryPick{background:linear-gradient(135deg,var(--accent2),#756cf0);border-color:transparent;color:#fff}.numberGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.numberPick{min-height:58px;border-radius:15px;border:1px solid var(--line);background:var(--soft);color:var(--text);font-size:22px;font-weight:1000}.numberPick:disabled{opacity:.3;text-decoration:line-through}.claimGrid{display:grid;gap:8px}.claimPick{min-height:54px;text-align:left;padding:11px 13px;border:1px solid var(--line);border-radius:14px;background:var(--soft);color:var(--text);font-size:13px;font-weight:850}.truthGrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.truthBtn,.lieBtn{min-height:66px;border-radius:16px;font-size:17px;font-weight:1000;border:1px solid var(--line)}.truthBtn{background:rgba(57,207,157,.14);color:var(--text)}.lieBtn{background:rgba(255,103,109,.14);color:var(--text)}.chosungHero{padding:14px;border-radius:16px;background:var(--soft);text-align:center;margin-bottom:10px}.chosungHero .initial{font-size:34px;font-weight:1000;letter-spacing:5px}.chosungHero .cat{font-size:11px;font-weight:900;color:var(--muted);margin-bottom:6px}.hintBox{margin:8px 0;padding:10px 11px;border:1px dashed var(--line);border-radius:12px;font-size:12px;color:var(--muted)}.wordRow{display:flex;gap:8px}.wordRow input{flex:1;min-width:0}.teamBadge{display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;border-radius:999px;background:var(--accent2);color:white;font-size:11px;font-weight:950}.smallResultTitle{font-size:18px;font-weight:1000;margin-bottom:9px}.smallWinner{border-left:3px solid var(--ok)}.smallLoser{border-left:3px solid var(--line)}
+@media(max-width:520px){.smallChoiceGrid,.truthGrid{grid-template-columns:1fr 1fr}.numberGrid{grid-template-columns:repeat(3,1fr)}}
+</style>
+<script>
+const SMALL_UI_GAMES=['match','number','bluff','chosung','teamsync'];
+function smallGame(){return !!S&&SMALL_UI_GAMES.includes(S.game_id)}
+function smallWaiting(){let gd=S?.game_data_public||{},stage=gd.small_stage;if(!smallGame()||stage==='result'){return ''}if(S.game_id==='bluff'&&stage==='claim'){return S.assignment?.role==='블러퍼'?'주장을 하나 고르세요.':'블러퍼가 주장을 고르는 중입니다.'}return `응답 ${gd.submitted||0}/${gd.needed||0}`}
+function smallAnswerButtons(options){return `<div class="smallChoiceGrid">${(options||[]).map((o,i)=>`<button class="smallChoice ${i===0?'primaryPick':''}" onclick="act('submit',{choice:${JSON.stringify(o)}})">${esc(o)}</button>`).join('')}</div>`}
+function renderSmallActions(){let d=$('privateActions'),m=$('minorActions'),a=S.assignment||{},gd=S.game_data_public||{},stage=gd.small_stage,submitted=gd.my_submitted;let sig=JSON.stringify([S.game_id,S.round_no,stage,submitted,a.role,a.mission,a.extra]);if(d.dataset.sig===sig)return;d.dataset.sig=sig;m.innerHTML='';
+ if(stage==='result'){d.innerHTML='<div class="notice">결과 공개 중 · 잠시 뒤 다음 라운드가 시작됩니다.</div>';return}
+ if(S.game_id==='match'||S.game_id==='teamsync'){
+   if(submitted)d.innerHTML=`<div class="notice">선택 완료 · ${smallWaiting()}</div>`;
+   else d.innerHTML=smallAnswerButtons(a.extra?.options||[]);
+   return;
+ }
+ if(S.game_id==='number'){
+   if(submitted){d.innerHTML=`<div class="notice">숫자 선택 완료 · ${smallWaiting()}</div>`;return}
+   let forbid=a.extra?.forbid;let desc=a.extra?.rule_desc||'';d.innerHTML=`<div class="notice" style="margin-bottom:9px">${esc(desc)}${forbid?`<br><b>${forbid}은 이번 라운드 선택 금지</b>`:''}</div><div class="numberGrid">${[1,2,3,4,5,6,7,8,9].map(n=>`<button class="numberPick" ${n===forbid?'disabled':''} onclick="act('submit',{choice:${n}})">${n}</button>`).join('')}</div>`;return;
+ }
+ if(S.game_id==='bluff'){
+   if(stage==='claim'){
+     if(a.role==='블러퍼'){let claims=a.extra?.claims||[];d.innerHTML=`<div class="notice" style="margin-bottom:9px">내 비밀 숫자를 보고 상대를 속일 주장을 고르세요. 진실을 골라도 됩니다.</div><div class="claimGrid">${claims.map(c=>`<button class="claimPick" onclick="act('submit',{choice:'${c.id}'})">${esc(c.text)}</button>`).join('')}</div>`}
+     else d.innerHTML='<div class="notice">블러퍼가 비밀 숫자를 보고 주장을 고르는 중입니다.</div>';
+     return;
+   }
+   if(stage==='vote'){
+     if(a.role==='블러퍼'){d.innerHTML='<div class="notice">다른 사람들이 당신의 주장을 판정하는 중입니다.</div>';return}
+     if(submitted){d.innerHTML=`<div class="notice">판정 완료 · ${smallWaiting()}</div>`;return}
+     d.innerHTML=`<div class="truthGrid"><button class="truthBtn" onclick="act('submit',{choice:'truth'})">✓ 진실</button><button class="lieBtn" onclick="act('submit',{choice:'lie'})">✕ 거짓</button></div>`;return;
+   }
+ }
+ if(S.game_id==='chosung'){
+   if(submitted){d.innerHTML=`<div class="notice">정답 제출 완료 · ${smallWaiting()}</div>`;return}
+   let hint=a.extra?.hint;d.innerHTML=`<div class="chosungHero"><div class="cat">${esc(a.extra?.category||'초성')}</div><div class="initial">${esc(a.mission||'')}</div></div>${hint?`<div class="hintBox"><b>힌트 공개</b> · ${esc(hint)}<br>힌트 후 정답은 보상이 조금 줄어듭니다.</div>`:`<div class="hintBox">아직 힌트 없음 · 지금 맞히면 더 높은 점수</div>`}<div class="wordRow"><input id="chosungAnswer" maxlength="24" autocomplete="off" placeholder="정답 입력" onkeydown="if(event.key==='Enter'){event.preventDefault();submitChosung()}"><button class="btn primary" onclick="submitChosung()">제출</button></div>`;setTimeout(()=>$('chosungAnswer')?.focus(),40);return;
+ }
+ d.innerHTML='<div class="notice">다른 참가자를 기다리는 중입니다.</div>';
+}
+function submitChosung(){let el=$('chosungAnswer');let text=(el?.value||'').trim();if(!text){toast('정답을 입력해 주세요');return}act('submit',{text})}
+const _v43RenderActions=renderActions;renderActions=function(){if(smallGame())return renderSmallActions();return _v43RenderActions()};
+const _v43RenderPlay=renderPlay;renderPlay=function(){_v43RenderPlay();if(!smallGame())return;let a=S.assignment||{},gd=S.game_data_public||{};$('roundText').textContent=`${gd.small_index||1}/${gd.small_total||8} 라운드`;if(S.game_id==='teamsync'){$('role').innerHTML=`<span class="teamBadge">${esc(a.role||'팀')}</span>`;$('targetLine').textContent='팀원과 상의 없이 선택';}else if(S.game_id==='chosung'){$('role').textContent=a.extra?.category||'초성';$('mission').textContent='아래 초성을 보고 정답을 입력하세요.';$('targetLine').textContent=a.extra?.hint?'힌트 공개됨':'힌트 전 정답은 보너스';}else if(S.game_id==='number'){$('role').textContent='눈치 숫자';$('targetLine').textContent=a.extra?.forbid?`${a.extra.forbid} 선택 금지`:'';}else if(S.game_id==='bluff'){$('targetLine').textContent=a.role==='블러퍼'?'비밀 숫자는 나만 볼 수 있습니다.':'블러퍼의 표정을 읽어보세요.';}else $('targetLine').textContent='모두 선택하면 동시에 공개';$('eventTitle').textContent=S.public.event_title||S.game?.title||'ROUND';$('eventText').textContent=S.public.event_text||'';updateSmallWaiting()};
+function updateSmallWaiting(){let box=$('waitingInfo');if(!smallGame())return;let txt=smallWaiting();box.classList.toggle('hidden',!txt);if(txt)box.innerHTML=`<span>${esc(txt)}</span>`}
+const _v43UpdateWaiting=updateWaiting;updateWaiting=function(){if(smallGame())return updateSmallWaiting();return _v43UpdateWaiting()};
+const _v43RenderRoundResult=renderRoundResult;renderRoundResult=function(){if(!smallGame())return _v43RenderRoundResult();let r=S?.round_result;$('roundResultBox').classList.toggle('hidden',!r);if(!r)return;let rows=(r.answers||[]).map(x=>`<div class="answerPerson ${x.correct?'smallWinner':'smallLoser'}"><span>${x.correct?'🏆':'·'} ${esc(x.player)}${x.fastest?' · ⚡최속':''}</span><b>${esc(x.choice)}</b></div>`).join('');$('roundResult').innerHTML=`<div class="smallResultTitle">${esc(r.title||'결과')}</div><div class="answerReveal">${rows}</div>`};
+const _v43UpdateLiveTimers=updateLiveTimers;updateLiveTimers=function(){_v43UpdateLiveTimers();if(smallGame()&&S.phase==='play'){let ir=localRemaining('interaction_remaining'),max=S.game_data_public?.interaction_total||10,fill=$('interactionFill');if(fill)fill.style.width=Math.max(0,Math.min(100,ir/max*100))+'%'}};
+const _v43PaceTag=paceTag;paceTag=function(idOrObj){let id=typeof idOrObj==='string'?idOrObj:idOrObj?.id;if(['match','number','chosung'].includes(id))return '빠름';return _v43PaceTag(idOrObj)};
+</script>
