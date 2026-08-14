@@ -1,0 +1,119 @@
+    }
+
+def public_game_data(room,pid):
+    gid=room['game_id']; gd=room['game_data']; out={}
+    if gid=='infection': out['infection_rate']=round(100*len(gd.get('infected',[]))/max(1,len(active_pids(room))))
+    if gid=='bomb': out['bomb_moves']=sum(p['metrics'].get('bomb_pass',0) for p in room['players'].values())
+    if gid=='night' and room['phase']=='play': out['votes_received']=Counter(room['votes'].values()).get(pid,0)
+    if gid in ('oddq','anon','choice'): out['submitted']=len(room['submissions']);out['needed']=len(active_pids(room))
+    if gid=='oddq' and (room.get('round_result') or {}).get('stage')=='guess': out['guessed']=len(room['votes']);out['needed']=len(active_pids(room))
+    return out
+
+def compute_today(room):
+    ps=list(room['players'].values());
+    if not ps:return {}
+    leader=max(ps,key=lambda p:p['score'])
+    hunter=max(ps,key=lambda p:p['metrics'].get('eliminations',0))
+    missions=max(ps,key=lambda p:p['metrics'].get('missions',0))
+    betrayer=max(ps,key=lambda p:p['metrics'].get('betrayals',0))
+    return {'games':len(room['history']),'leader':leader['name'],'leader_score':leader['score'],'hunter':hunter['name'],'hunter_n':hunter['metrics'].get('eliminations',0),'missions':missions['name'],'missions_n':missions['metrics'].get('missions',0),'betrayer':betrayer['name'],'betrayals':betrayer['metrics'].get('betrayals',0)}
+
+# ---------- Actions ----------
+def do_action(room,pid,data):
+    t=data.get('type'); me=room['players'].get(pid)
+    if not me: raise ValueError('참가자를 찾을 수 없습니다.')
+    is_host=(pid==room['host_pid'])
+    if t=='leave_room':
+        me['active']=False
+        me['last_seen']=now()
+        if is_host:
+            others=[x for x in room['players'].values() if x['id']!=pid and x.get('active')]
+            if others:
+                me['host']=False
+                new_host=max(others,key=lambda x:x.get('last_seen',0))
+                new_host['host']=True
+                room['host_pid']=new_host['id']
+                room['public']['event_title']='방장 변경'
+                room['public']['event_text']=f'{new_host["name"]}님이 새 방장이 되었습니다.'
+        return
+    if t=='settings':
+        if not is_host: raise ValueError('방장만 설정할 수 있습니다.')
+        for k in ('spice','touch','drink','dating','verification','tempo'):
+            if k in data: room['settings'][k]=data[k]
+    elif t=='select_game':
+        if not is_host: raise ValueError('방장만 게임을 선택할 수 있습니다.')
+        gid=data.get('game_id');
+        if gid not in GAMES: raise ValueError('게임이 없습니다.')
+        room['game_id']=gid;room['phase']='guide';room['round_result']=None;room['result']=None
+    elif t=='open_games':
+        if not is_host: raise ValueError('방장만 게임 선택 화면을 열 수 있습니다.')
+        room['phase']='games';room['deadline']=None
+    elif t=='back_lobby':
+        if not is_host: raise ValueError('방장만 이동할 수 있습니다.')
+        room['phase']='lobby';room['game_id']=None;room['deadline']=None
+    elif t=='start':
+        if not is_host: raise ValueError('방장만 시작할 수 있습니다.')
+        n=len(active_pids(room)); lo,hi=game_player_limits(room['game_id'])
+        if not (lo<=n<=hi): raise ValueError(f'{GAMES[room["game_id"]]["title"]}은(는) {lo}~{hi}명으로 플레이해 주세요. 현재 {n}명입니다.')
+        setup_game(room)
+    elif t=='replay':
+        if not is_host: raise ValueError('방장만 재경기할 수 있습니다.')
+        n=len(active_pids(room)); lo,hi=game_player_limits(room['game_id'])
+        if not (lo<=n<=hi): raise ValueError(f'{GAMES[room["game_id"]]["title"]}은(는) {lo}~{hi}명으로 플레이해 주세요. 현재 {n}명입니다.')
+        setup_game(room,True)
+    elif t=='pause':
+        if not is_host: raise ValueError('방장만 일시정지할 수 있습니다.')
+        if room['phase']!='play': return
+        if not room['paused']:
+            room['pause_remaining']=max(0,room['deadline']-now());room['paused']=True
+        else:
+            room['deadline']=now()+(room.get('pause_remaining') or 0);room['pause_remaining']=None;room['paused']=False
+    elif t=='event':
+        if not is_host: raise ValueError('방장만 사건을 발생시킬 수 있습니다.')
+        trigger_event(room)
+    elif t=='end':
+        if not is_host: raise ValueError('방장만 종료할 수 있습니다.')
+        finish_game(room)
+    elif t=='mission_success': handle_success_request(room,pid)
+    elif t=='reroll': handle_reroll(room,pid)
+    elif t=='confirm': handle_confirm(room,pid,data.get('id'),bool(data.get('ok')))
+    elif t=='submit': handle_submit(room,pid,data)
+    elif t=='guess': handle_guess(room,pid,data)
+    elif t=='next_round':
+        if not is_host: raise ValueError('방장만 다음 라운드로 넘길 수 있습니다.')
+        next_round(room)
+    elif t=='alliance': handle_alliance(room,pid,data.get('target'))
+    elif t=='betray': handle_betray(room,pid)
+    elif t=='night_vote': handle_night_vote(room,pid,data.get('target'))
+    elif t=='night_investigate': handle_night_investigate(room,pid,data.get('target'))
+    elif t=='ghost_hint': handle_ghost_hint(room,pid,data.get('target'))
+    elif t=='finish_night_vote':
+        if not is_host: raise ValueError('방장만 투표를 마감할 수 있습니다.')
+        resolve_night_vote(room)
+    elif t=='toggle_active':
+        if not is_host: raise ValueError('방장만 참가 여부를 바꿀 수 있습니다.')
+        target=data.get('target')
+        if target in room['players'] and target!=room['host_pid']: room['players'][target]['active']=not room['players'][target]['active']
+    else: raise ValueError('알 수 없는 동작입니다.')
+
+
+def handle_reroll(room,pid):
+    gid=room.get('game_id'); ass=room.get('assignments',{}).get(pid) or {}
+    if gid not in ('bounty','night','secret','bomb','infection','forbidden'):
+        raise ValueError('이 게임에서는 미션 교체를 사용하지 않습니다.')
+    extra=ass.setdefault('extra',{})
+    left=int(extra.get('rerolls_left',0))
+    if left<=0: raise ValueError('이번 판 무료 미션 교체를 이미 사용했습니다.')
+    if gid in ('bounty','bomb','infection','forbidden'):
+        ass['mission']=target_mission(room)
+    else:
+        ass['mission']=self_mission(room)
+    extra['rerolls_left']=left-1
+    room['public']['event_title']='미션 교체'
+    room['public']['event_text']='한 플레이어가 미션을 교체했습니다.'
+
+def handle_success_request(room,pid):
+    gid=room['game_id']; ass=room['assignments'].get(pid) or {}; target=ass.get('target')
+    if gid in ('bounty','bomb','infection','forbidden') and target and room['settings'].get('verification',True):
+        pend=uid(); room['pending'][pend]={'from':pid,'target':target,'kind':gid,'detail':ass.get('mission','미션 성공'),'deadline':now()+15};room['public']['event_title']='성공 확인 중';room['public']['event_text']='상대방의 확인을 기다리는 성공 신고가 있습니다.'
+    else: apply_success(room,pid,target,gid)
