@@ -1,0 +1,13 @@
+# v4.5.4: Mafia discussion fuel — partial evidence, bluff cards, and discussion prompts.
+
+MAFIA_DISCUSSION_TASKS=[
+    '단서를 바로 공개하지 말고 먼저 한 사람의 알리바이를 물어보세요.',
+    '두 사람에게 각각 가장 의심스러운 사람을 물어보고 답이 충돌하는지 보세요.',
+    '한 사람을 잠정적으로 두둔한 뒤 다른 사람들의 반응을 관찰하세요.',
+    '누가 밤 행동을 했을지 한 명을 지목하고 이유를 요구하세요.',
+    '당신의 단서와 맞지 않는 말을 한 사람이 있는지 끝까지 확인하세요.',
+    '처음 20초는 듣기만 하고, 마지막에 가장 수상한 주장 하나를 짚으세요.',
+]
+
+def mafia_team(pid,room):
+    return 'ma
