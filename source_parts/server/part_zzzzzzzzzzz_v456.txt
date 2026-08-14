@@ -1,0 +1,160 @@
+# v4.5.6: Final 5-6 player Mafia pacing + host discussion controls + per-candidate defense.
+
+
+def _mafia_host(room,pid):
+    p=room.get('players',{}).get(pid,{})
+    return bool(p.get('host')) or pid==room.get('host_id')
+
+
+def mafia_discussion_seconds(room):
+    gd=room.get('game_data',{});initial=int(gd.get('mafia_initial_n') or len(active_pids(room)));alive=len(mafia_alive(room));day=max(1,int(gd.get('mafia_day',1)))
+    if initial==5:
+        if alive<=3:return 60
+        if day==1:return 90
+        if day==2:return 75
+        return 60
+    if initial==6:
+        if alive<=3:return 60
+        if alive<=4:return 70
+        return 100 if day==1 else 85
+    # Larger groups retain a brisk automatic curve.
+    base=80 if alive<=8 else 95 if alive<=10 else 110
+    return max(60,base-(day-1)*8)
+
+
+_V456_SETUP_MAFIA=setup_mafia
+def setup_mafia(room):
+    _V456_SETUP_MAFIA(room)
+    # Give first-time players enough time to read role and the public composition.
+    if room.get('phase')=='countdown':
+        room['phase_started']=now();room['deadline']=room['phase_started']+8
+    gd=room.get('game_data',{});gd['mafia_discuss_extended_day']=None;gd['mafia_discuss_started_at']=None;gd['mafia_defense_index']=0
+
+
+def start_mafia_discuss(room):
+    gd=room['game_data'];gd['mafia_stage']='discuss';room['round_result']=None;sec=mafia_discussion_seconds(room);ts=now()
+    gd['mafia_discuss_total']=sec;gd['mafia_discuss_started_at']=ts;gd['mafia_discuss_warning']=False
+    room['public']['event_title']=f'{gd["mafia_day"]}일차 토론 · {sec}초'
+    if _mafia_small(room):room['public']['event_text']='개인 정보의 종류가 서로 다릅니다. 주장과 야간 흔적을 비교하고, 거짓말의 모순을 찾으세요.'
+    else:room['public']['event_text']='각자의 정보를 비교해 모순을 찾고 용의자를 좁히세요.'
+    room['interaction_deadline']=ts+sec;room['deadline']=room['interaction_deadline']
+
+
+def start_mafia_nomination(room):
+    gd=room['game_data'];gd['mafia_stage']='nominate';gd['mafia_nomination_votes']={};room['votes']={};room['round_result']=None
+    room['public']['event_title']='1차 용의자 지목 · 15초';room['public']['event_text']='토론에서 가장 의심스러웠던 한 명을 고르세요. 상위 득표자들이 결선 후보가 됩니다.'
+    room['interaction_deadline']=now()+15;room['deadline']=room['interaction_deadline']
+
+
+def _mafia_begin_defense(room,candidates,counts):
+    gd=room['game_data'];gd['mafia_candidates']=candidates;gd['mafia_stage']='defense';gd['mafia_defense_index']=0;gd['mafia_defense_total']=len(candidates)
+    names=' vs '.join(_mafia_name(room,p) for p in candidates)
+    room['round_result']={'stage':'mafia_nomination_result','title':'결선 후보','text':names,'counts':[{'name':_mafia_name(room,p),'count':counts[p]} for p in candidates]}
+    current=candidates[0] if candidates else None;gd['mafia_defense_candidate']=current
+    room['public']['event_title']='🗣️ 최후변론 1/'+str(max(1,len(candidates)))
+    room['public']['event_text']=(f'{_mafia_name(room,current)}님만 15초 동안 변론하세요. 다른 사람은 듣기만 합니다.' if current else '결선 후보를 확인합니다.')
+    room['interaction_deadline']=now()+15;room['deadline']=room['interaction_deadline']
+
+
+def resolve_mafia_nomination(room):
+    gd=room['game_data'];alive=mafia_alive(room);votes={p:t for p,t in gd.get('mafia_nomination_votes',{}).items() if p in alive and t in alive and p!=t}
+    if not votes:
+        candidates=random.sample(alive,min(2,len(alive)));counts=Counter()
+    else:
+        counts=Counter(votes.values());ordered=counts.most_common();first=ordered[0][1];top=[p for p,c in ordered if c==first]
+        if len(top)>=2:candidates=random.sample(top,min(2,len(top)))
+        else:
+            candidates=[top[0]];second=[p for p,c in ordered if c<first]
+            if second:
+                second_count=max(counts[p] for p in second);pool=[p for p in second if counts[p]==second_count];candidates.append(random.choice(pool))
+            elif len(alive)>1:candidates.append(random.choice([p for p in alive if p!=top[0]]))
+    _mafia_begin_defense(room,candidates,counts)
+
+
+def _mafia_next_defense(room):
+    gd=room['game_data'];cands=gd.get('mafia_candidates',[]);idx=int(gd.get('mafia_defense_index',0))+1
+    if idx>=len(cands):return start_mafia_final_vote(room)
+    gd['mafia_defense_index']=idx;gd['mafia_defense_candidate']=cands[idx]
+    room['round_result']=None;room['public']['event_title']=f'🗣️ 최후변론 {idx+1}/{len(cands)}';room['public']['event_text']=f'{_mafia_name(room,cands[idx])}님만 15초 동안 변론하세요. 다른 사람은 듣기만 합니다.'
+    room['interaction_deadline']=now()+15;room['deadline']=room['interaction_deadline']
+
+
+def start_mafia_final_vote(room):
+    gd=room['game_data'];gd['mafia_stage']='final_vote';gd['mafia_final_votes']={};room['round_result']=None;forced=gd.get('mafia_no_elim_streak',0)>=1
+    room['public']['event_title']='결선투표 · 15초';room['public']['event_text']='최후변론을 들었습니다. 탈락시킬 후보를 선택하세요.'+(' 이번에는 반드시 한 명을 결정합니다.' if forced else ' 확신이 없으면 살려둘 수 있습니다.')
+    room['interaction_deadline']=now()+15;room['deadline']=room['interaction_deadline'];gd['mafia_abstain_allowed']=not forced
+
+
+def _mafia_extend_discussion(room,pid):
+    gd=room.get('game_data',{});day=int(gd.get('mafia_day',1))
+    if not _mafia_host(room,pid):raise ValueError('방장만 토론을 연장할 수 있습니다.')
+    if gd.get('mafia_stage')!='discuss':raise ValueError('지금은 토론 시간이 아닙니다.')
+    if gd.get('mafia_discuss_extended_day')==day:raise ValueError('오늘은 이미 토론을 한 번 연장했습니다.')
+    rem=max(0,room.get('interaction_deadline',now())-now())
+    if rem>30:raise ValueError('토론 종료 30초 전부터 연장할 수 있습니다.')
+    room['interaction_deadline']=max(now(),room.get('interaction_deadline',now()))+60;room['deadline']=room['interaction_deadline'];gd['mafia_discuss_extended_day']=day;gd['mafia_discuss_total']=int(gd.get('mafia_discuss_total',0))+60
+    room['public']['event_title']='⏱ 토론 +1분';room['public']['event_text']='방장이 토론을 60초 연장했습니다. 핵심 쟁점을 더 확인하세요.'
+
+
+def _mafia_skip_discussion(room,pid):
+    gd=room.get('game_data',{})
+    if not _mafia_host(room,pid):raise ValueError('방장만 토론을 마감할 수 있습니다.')
+    if gd.get('mafia_stage')!='discuss':raise ValueError('지금은 토론 시간이 아닙니다.')
+    elapsed=now()-float(gd.get('mafia_discuss_started_at') or now())
+    if elapsed<30:raise ValueError('최소 30초는 토론한 뒤 바로 지목할 수 있습니다.')
+    start_mafia_nomination(room)
+
+
+_V456_DO_ACTION=do_action
+def do_action(room,pid,data):
+    t=data.get('type')
+    if room.get('game_id')=='mafia' and t=='mafia_extend_discussion':return _mafia_extend_discussion(room,pid)
+    if room.get('game_id')=='mafia' and t=='mafia_skip_discussion':return _mafia_skip_discussion(room,pid)
+    return _V456_DO_ACTION(room,pid,data)
+
+
+_V456_TICK=tick
+def tick(room):
+    if room.get('game_id')!='mafia':return _V456_TICK(room)
+    if room.get('phase')=='countdown':return _V456_TICK(room)
+    if room.get('phase')!='play' or room.get('paused'):return
+    gd=room.get('game_data',{});ts=now();st=gd.get('mafia_stage')
+    if ts>=gd.get('mafia_hard_end_at',1e18):gd['mafia_no_elim_streak']=1
+    if st=='night' and ts>=room.get('interaction_deadline',1e18):resolve_mafia_night(room)
+    elif st=='morning' and ts>=room.get('interaction_deadline',1e18):start_mafia_discuss(room)
+    elif st=='discuss':
+        rem=room.get('interaction_deadline',ts)-ts
+        if rem<=20 and not gd.get('mafia_discuss_warning'):
+            gd['mafia_discuss_warning']=True;room['public']['event_title']='토론 20초 남음';room['public']['event_text']='새 주장보다 지금까지의 근거를 정리하고 용의자를 좁히세요.'
+        if ts>=room.get('interaction_deadline',1e18):start_mafia_nomination(room)
+    elif st=='nominate' and ts>=room.get('interaction_deadline',1e18):resolve_mafia_nomination(room)
+    elif st=='defense' and ts>=room.get('interaction_deadline',1e18):_mafia_next_defense(room)
+    elif st=='final_vote' and ts>=room.get('interaction_deadline',1e18):resolve_mafia_final_vote(room)
+    elif st=='vote_result' and ts>=room.get('interaction_deadline',1e18):gd['mafia_day']+=1;start_mafia_night(room)
+
+
+_V456_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V456_PUBLIC_GAME_DATA(room,pid);gd=room.get('game_data',{})
+    if room.get('game_id')=='mafia':
+        rem=max(0,float(room.get('interaction_deadline') or 0)-now()) if gd.get('mafia_stage')=='discuss' else 0
+        elapsed=max(0,now()-float(gd.get('mafia_discuss_started_at') or now())) if gd.get('mafia_stage')=='discuss' else 0
+        day=int(gd.get('mafia_day',1))
+        out.update({
+            'defense_candidate':gd.get('mafia_defense_candidate'),'defense_index':int(gd.get('mafia_defense_index',0)),'defense_total':int(gd.get('mafia_defense_total',0)),
+            'discussion_extended':gd.get('mafia_discuss_extended_day')==day,
+            'can_extend_discussion':bool(_mafia_host(room,pid) and gd.get('mafia_stage')=='discuss' and rem<=30 and gd.get('mafia_discuss_extended_day')!=day),
+            'can_skip_discussion':bool(_mafia_host(room,pid) and gd.get('mafia_stage')=='discuss' and elapsed>=30)
+        })
+    return out
+
+
+_V456_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V456_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.6';return out
+
+_V456_GET=Handler.do_GET
+def _v456_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.6'})
+    return _V456_GET(self)
+Handler.do_GET=_v456_do_get
