@@ -1,0 +1,427 @@
+# v4.4: game-specific adaptive flow, deeper social play, simpler visible settings
+
+# Update public descriptions without adding more user-facing setup.
+GAMES['night'].update(desc='3막으로 전개되는 스토리 추리전. 시간이 흐를수록 단서와 압박이 강해집니다.')
+GAMES['infection'].update(desc='감염자는 퍼뜨리고 인간은 한 번의 집단 검사를 활용해 끝까지 생존하는 팀 추리전.')
+GAMES['betray'].update(desc='동맹과 공동계약을 맺고 끝까지 지킬지 배신할지 선택하는 협상 게임.')
+GAMES['chosung'].update(desc='초성만 시작해 분야와 힌트가 단계적으로 열리는 스피드 단어전.')
+GAMES['teamsync'].update(title='팀 대항전',cat='팀전/종합',desc='싱크·숫자·상식·초성을 번갈아 겨루는 두 팀 종합전.',guide=['두 팀으로 자동 배정됩니다.','라운드마다 팀 싱크·숫자·상식·초성 종목이 바뀝니다.','각 종목은 팀 인원수 차이를 비율·평균으로 보정합니다.','마지막 라운드는 보상이 커져 역전이 가능합니다.'])
+
+HUMAN_SURVIVAL_TASKS=[
+    '다음 3분 동안 다른 사람에게 먼저 물건을 건네지 마세요.',
+    '다음 3분 동안 누가 유난히 당신에게 말을 거는지 관찰하세요.',
+    '다음 3분 동안 같은 사람이 두 번 접근하는지 기억하세요.',
+    '다음 3분 동안 자리 이동을 최소화하고 주변 행동을 관찰하세요.',
+    '누가 갑자기 자연스럽지 않은 질문을 하는지 한 명만 기억해 두세요.',
+]
+
+def ensure_v44(room):
+    gd=room.setdefault('game_data',{})
+    gd.setdefault('v44_success_times',[])
+    gd.setdefault('v44_last_success_at',0)
+    return room
+
+def _mission_complexity(text):
+    t=str(text);score=1
+    for k in ('두 명','두 사람','두 번','연속','3분','5초 이상','두 개','두 사람의','각각'):
+        if k in t:score+=1
+    if len(t)>34:score+=1
+    return min(3,score)
+
+def _desired_mission_level(room,gid):
+    gd=room.setdefault('game_data',{});ts=now();started=gd.get('v44_started_at') or room.get('phase_started') or ts
+    recent=[x for x in gd.get('v44_success_times',[]) if ts-x<240]
+    idle=ts-(gd.get('v44_last_success_at') or started)
+    if idle>240:return 1
+    if len(recent)>=4:return 3
+    return 2
+
+_V44_TARGET_MISSION=target_mission
+def target_mission(room,kind=None,gid=None):
+    gid=gid or room.get('game_id') or 'bounty'
+    if kind is not None:return _V44_TARGET_MISSION(room,kind,gid)
+    gd=room.setdefault('game_data',{});ts=now();started=gd.get('v44_started_at') or room.get('phase_started') or ts;idle=ts-(gd.get('v44_last_success_at') or started)
+    say=.48
+    if gid=='bomb':
+        rem=(room.get('deadline') or ts+300)-ts;say=.78 if rem<90 else .58
+    elif gid=='infection':
+        inf=len(gd.get('infected',[]));n=max(1,len(active_pids(room)));rate=inf/n;elapsed=ts-started;say=.70 if elapsed>420 and rate<.45 else .32 if rate>.70 else .46
+    elif gid=='bounty':say=.72 if idle>210 else .30 if len([x for x in gd.get('v44_success_times',[]) if ts-x<180])>=3 else .45
+    elif gid=='forbidden':say=.68 if idle>300 else .46
+    return _V44_TARGET_MISSION(room,'say' if random.random()<say else 'action',gid)
+
+_V44_SELF_MISSION=self_mission
+def self_mission(room,gid=None):
+    gid=gid or room.get('game_id') or 'secret';pool=NIGHT_MISSIONS if gid=='night' else SECRET_MISSIONS;pool=filtered(pool,room['settings']);desired=_desired_mission_level(room,gid)
+    candidates=[x for x in pool if abs(_mission_complexity(x[0])-desired)<=1] or pool
+    x=pick_recent(room,f'{gid}_self_missions',candidates,lambda a:a[0]);return x[0]
+
+# ---------- adaptive setup / play ----------
+_V44_SETUP_GAME=setup_game
+def setup_game(room,replay=False):
+    _V44_SETUP_GAME(room,replay);ensure_v44(room);gd=room['game_data'];gd['v44_success_times']=[];gd['v44_last_success_at']=0
+    gid=room.get('game_id')
+    if gid=='night':gd['night_act']=1;gd['night_act_announced']=1
+    if gid=='infection':
+        gd['scan_used']=False;gd['scan_open']=False;gd['scan_votes']={};gd['scan_result']=None
+        for p in active_pids(room):
+            if p not in set(gd.get('infected',[])):
+                room['assignments'][p].setdefault('extra',{})['human_task']=random.choice(HUMAN_SURVIVAL_TASKS)
+                append_private_notice(room,p,'생존 임무: '+room['assignments'][p]['extra']['human_task'])
+    if gid=='betray':gd['contracts']={}
+    if gid=='forbidden':gd['forbidden_reminder_at']=0
+
+_V44_ENTER_PLAY=enter_play
+def enter_play(room):
+    _V44_ENTER_PLAY(room);ensure_v44(room);gd=room['game_data'];gd['v44_started_at']=now();gd['v44_last_success_at']=0
+    gid=room.get('game_id')
+    if gid=='night':
+        duration=max(1,game_duration(room));gd['night_act2_at']=now()+duration*.38;gd['night_act3_at']=now()+duration*.72
+    if gid=='infection':gd['scan_open_at']=now()+max(240,game_duration(room)*.42)
+    if gid=='forbidden':gd['forbidden_reminder_at']=now()+300
+
+_V44_APPLY_SUCCESS=apply_success
+def apply_success(room,pid,target,gid,assignment_version=None):
+    ok=_V44_APPLY_SUCCESS(room,pid,target,gid,assignment_version)
+    if not ok:return ok
+    gd=room.setdefault('game_data',{});ts=now();gd.setdefault('v44_success_times',[]).append(ts);gd['v44_success_times']=gd['v44_success_times'][-30:];gd['v44_last_success_at']=ts
+    # A betrayal alliance now has a real shared contract: both partners must each clear one objective.
+    if gid=='betray':
+        ass=room.get('assignments',{}).get(pid) or {};cid=(ass.get('extra') or {}).get('contract_id');contract=gd.setdefault('contracts',{}).get(cid) if cid else None
+        if contract and not contract.get('done') and not contract.get('failed'):
+            contract.setdefault('progress',{})[pid]=1
+            members=[p for p in contract.get('members',[]) if p in room['players']]
+            if members and all(contract['progress'].get(p) for p in members):
+                contract['done']=True
+                for p in members:
+                    score(room,p,3);append_private_notice(room,p,'공동계약 성공 · 둘 다 +3점')
+                    room['assignments'][p].setdefault('extra',{})['contract_text']='공동계약 완료 · +3점'
+                room['public']['event_title']='계약 성립';room['public']['event_text']='한 동맹이 공동계약을 끝까지 지켰습니다.'
+            elif contract:
+                for p in members:
+                    done=sum(1 for m in members if contract['progress'].get(m));room['assignments'][p].setdefault('extra',{})['contract_text']=f'공동계약 · 두 사람 모두 목표 1회 성공 ({done}/{len(members)})'
+    return ok
+
+# ---------- Pension Night: automatic 3-act structure ----------
+def _night_next_clue(room,prefix):
+    story=room.get('public',{}).get('story') or {};clues=story.get('clues') or [];idx=int(room.get('game_data',{}).get('story_clue_idx',0))
+    if idx<len(clues):
+        room['game_data']['story_clue_idx']=idx+1;return f'{prefix} · {clues[idx]}'
+    return prefix
+
+def _night_set_act(room,act):
+    gd=room['game_data'];gd['night_act']=act;gd['night_act_announced']=act
+    if act==2:
+        room['public']['event_title']='ACT 2 · 의심 확산';room['public']['event_text']=_night_next_clue(room,'새로운 증거가 공개되었습니다. 알리바이를 다시 비교하세요')
+    else:
+        room['public']['event_title']='ACT 3 · 최종 압박';room['public']['event_text']=_night_next_clue(room,'결정적 국면입니다. 이제 말보다 서로의 행동과 앞선 증언을 비교하세요')
+        for p in active_pids(room):append_private_notice(room,p,'최종 국면 · 의심 대상을 정하고 투표를 준비하세요.')
+
+# ---------- Infection: one noisy group scan so humans have agency ----------
+def open_infection_scan(room):
+    gd=room['game_data'];gd['scan_open']=True;gd['scan_votes']={};gd['scan_deadline']=now()+22
+    room['public']['event_title']='감염 검사';room['public']['event_text']='인간 생존자들은 가장 의심스러운 한 명을 선택하세요. 검사는 완벽하지 않습니다.'
+
+def resolve_infection_scan(room):
+    gd=room['game_data'];votes={p:t for p,t in gd.get('scan_votes',{}).items() if p in active_pids(room) and t in active_pids(room)};gd['scan_open']=False;gd['scan_used']=True
+    if not votes:
+        gd['scan_result']='검사 무산';room['public']['event_title']='검사 무산';room['public']['event_text']='유효한 검사 표가 없어 이번 검사는 종료되었습니다.';return
+    cnt=Counter(votes.values());mx=max(cnt.values());tops=[p for p,c in cnt.items() if c==mx];target=random.choice(tops);infected=target in set(gd.get('infected',[]));signal=infected if random.random()<.85 else not infected
+    txt=f'{room["players"][target]["name"]} · '+('강한 감염 반응 감지' if signal else '뚜렷한 감염 반응 없음')+' (검사 정확도는 100%가 아닙니다.)'
+    gd['scan_result']=txt;room['public']['event_title']='검사 결과';room['public']['event_text']=txt
+
+def handle_infection_scan(room,pid,target):
+    gd=room.get('game_data',{});infected=set(gd.get('infected',[]))
+    if room.get('game_id')!='infection' or not gd.get('scan_open'):raise ValueError('지금은 감염 검사 시간이 아닙니다.')
+    if pid in infected:raise ValueError('감염자는 검사 투표에 참여할 수 없습니다.')
+    if pid in gd.setdefault('scan_votes',{}):raise ValueError('이미 검사 대상을 선택했습니다.')
+    if target not in active_pids(room) or target==pid:raise ValueError('다른 참가자를 선택하세요.')
+    gd['scan_votes'][pid]=target
+    humans=[p for p in active_pids(room) if p not in infected]
+    if len(gd['scan_votes'])>=len(humans):resolve_infection_scan(room)
+
+# ---------- Different Question: similarity rises naturally by round ----------
+def _pair_similarity(pair):
+    a,b=pair[0],pair[1];sa=set(a.replace('?','').split());sb=set(b.replace('?','').split());word=len(sa&sb)/max(1,len(sa|sb));ca=set(a);cb=set(b);char=len(ca&cb)/max(1,len(ca|cb));return word*.55+char*.45
+
+def setup_odd_round(room):
+    pool=list(ODD_PAIRS)
+    if room['settings'].get('spice') in ('spicy','hot'):pool+=ODD_SPICY
+    if room['settings'].get('spice')=='hot':pool+=ODD_HOT
+    pool=filtered(pool,room['settings']);target={1:.48,2:.60,3:.70}.get(room.get('round_no',1),.60);ranked=sorted(pool,key=lambda x:abs(_pair_similarity(x)-target));short=ranked[:max(8,min(20,len(ranked)))];pair=pick_recent(room,'odd_pairs',short,lambda x:x[0]+'|'+x[1]);pids=active_pids(room);odd=random.choice(pids)
+    room['game_data']['odd']=odd;room['game_data']['pair']=[pair[0],pair[1]];room['game_data']['odd_similarity']=round(_pair_similarity(pair),2);room['submissions']={};room['votes']={};room['round_result']=None
+    for p in pids:
+        q=pair[1] if p==odd else pair[0];make_assignment(room,p,'다른 질문' if p==odd else '일반 질문',q,None,{'question':q})
+    room['public']['event_title']=f'{room["round_no"]}라운드';room['public']['event_text']='질문을 말하지 말고 답과 이유만 남기세요.'
+
+# ---------- Anonymous reveal: personal pass without breaking anonymity ----------
+_V44_RESOLVE_ANON=resolve_anon
+def resolve_anon(room):
+    subs=room.get('submissions',{});valid={p:v for p,v in subs.items() if not v.get('pass') and v.get('target') in room['players']}
+    original=room['submissions'];room['submissions']=valid
+    try:_V44_RESOLVE_ANON(room)
+    finally:room['submissions']=original
+    if room.get('round_result') is not None:room['round_result']['passes']=sum(1 for v in subs.values() if v.get('pass'))
+
+def anon_pass(room,pid):
+    if room.get('game_id')!='anon' or room.get('round_result'):raise ValueError('지금은 패스할 수 없습니다.')
+    if pid in room.get('submissions',{}):raise ValueError('이미 제출했습니다.')
+    room['submissions'][pid]={'pass':True}
+    if len([p for p in room['submissions'] if p in active_pids(room)])>=len(active_pids(room)):resolve_anon(room)
+
+# ---------- Last Choice: rounds intentionally escalate ----------
+def setup_choice_round(room):
+    r=room.get('round_no',1);rules=('help','cooperate','minority') if r==1 else ('minority','cooperate','betrayal') if r==2 else ('risk','single_greed','betrayal');pool=[c for c in CHOICES if c.get('rule') in rules] or CHOICES;c=pick_recent(room,'choices',pool,lambda x:x['title']);room['game_data']['choice']=c;room['game_data']['choice_intensity']=r;room['submissions']={};room['round_result']=None
+    for p in active_pids(room):make_assignment(room,p,'선택자',c['text'],None,{'a':c['a'],'b':c['b']})
+    label='탐색' if r==1 else '갈등' if r==2 else 'FINAL';room['public']['event_title']=f'{label} · {c["title"]}';room['public']['event_text']=c['text']
+
+# ---------- Quiz: category is the only meaningful setup; difficulty adapts ----------
+def _quiz_pick(room,cats,diff,exclude):
+    pool=[q for q in QUIZ_QUESTIONS if q['cat'] in cats and q['diff']==diff and q['q'] not in exclude]
+    if not pool:pool=[q for q in QUIZ_QUESTIONS if q['cat'] in cats and q['q'] not in exclude]
+    if not pool:return None
+    q=dict(random.choice(pool));opts=list(q['options']);random.shuffle(opts);q['options']=opts;return q
+
+def prepare_quiz(room):
+    ensure_v42_room(room);s=room['settings'];cats=set(s.get('quiz_categories') or QUIZ_CATEGORIES);seq=['easy','normal','normal','easy','normal','hard','normal','hard','normal','hard'];questions=[];used=set(room.setdefault('used',{}).setdefault('quiz_questions',[]))
+    for diff in seq:
+        q=_quiz_pick(room,cats,diff,used|{x['q'] for x in questions})
+        if q:questions.append(q)
+    room['used']['quiz_questions']=(room['used']['quiz_questions']+[q['q'] for q in questions])[-160:]
+    room['game_data']={'start_scores':{p:room['players'][p]['score'] for p in active_pids(room)},'quiz_questions':questions,'quiz_index':0,'quiz_stage':'ready','quiz_total':len(questions),'quiz_correct_count':{},'quiz_fast_count':{},'quiz_adaptive':True}
+    room['assignments']={};room['pending']={};room['submissions']={};room['votes']={};room['round_result']=None;room['round_no']=1;room['public']={'event_title':'상식 배틀 준비','event_text':'난이도는 정답률에 맞춰 자동 조절됩니다.','story':None,'special':None};room['phase']='countdown';room['phase_started']=now();room['deadline']=now()+5;room['interaction_deadline']=None;room['paused']=False;room['pause_remaining']=None;room['paused_at']=None
+
+_V44_RESOLVE_QUIZ=resolve_quiz
+def resolve_quiz(room):
+    gd=room.get('game_data',{});idx=int(gd.get('quiz_index',0));subs=dict(room.get('submissions',{}));_V44_RESOLVE_QUIZ(room)
+    if room.get('game_id')!='quiz' or gd.get('quiz_stage')!='result' or idx+1>=len(gd.get('quiz_questions',[])):return
+    answered=max(1,len(active_pids(room)));correct=sum(1 for v in subs.values() if idx<len(gd['quiz_questions']) and v.get('choice')==gd['quiz_questions'][idx]['answer']);rate=correct/answered;desired='hard' if rate>=.75 else 'easy' if rate<=.35 else 'normal';cats=set(room['settings'].get('quiz_categories') or QUIZ_CATEGORIES);exclude={q['q'] for q in gd['quiz_questions'][:idx+1]};q=_quiz_pick(room,cats,desired,exclude)
+    if q:gd['quiz_questions'][idx+1]=q;gd['quiz_next_level']=desired
+
+# ---------- shared small-game improvements ----------
+_V44_START_SMALL=start_small_round
+def start_small_round(room):
+    _V44_START_SMALL(room);gid=room.get('game_id');gd=room.get('game_data',{});idx=int(gd.get('small_index',0));pids=active_pids(room);sec=small_seconds(room)
+    if gid=='match':
+        cut=max(24,len(MATCH_PROMPTS)//2);pool=MATCH_PROMPTS[:cut] if idx<3 else MATCH_PROMPTS;prompt,a,b=random.choice(pool);gd['match']={'prompt':prompt,'a':a,'b':b}
+        for p in pids:make_assignment(room,p,'싱크 플레이어',prompt,None,{'options':[a,b]})
+        room['public']['event_title']=f'마음 맞추기 · {idx+1}/{gd["small_total"]}';room['public']['event_text']='초반은 가볍게, 뒤로 갈수록 서로의 취향을 더 읽어보세요.'
+    elif gid=='number':
+        n=len(pids);allowed=['avg80','closest5','far5','solo'] if n<=2 else ['low_unique','high_unique','avg80','median','pair','solo','closest5'] if n<=4 else [r[0] for r in NUMBER_RULES];last=gd.get('last_number_rule');rules=[r for r in NUMBER_RULES if r[0] in allowed and r[0]!=last] or [r for r in NUMBER_RULES if r[0] in allowed];rule=random.choice(rules);gd['number_rule']=rule[0];gd['last_number_rule']=rule[0];forbid=None
+        if idx>0 and gd.get('last_number_values') and random.random()<.30:forbid=random.choice(gd['last_number_values'])
+        gd['number_forbid']=forbid
+        for p in pids:make_assignment(room,p,'숫자 플레이어',rule[1],None,{'rule_desc':rule[2],'forbid':forbid})
+        room['public']['event_title']=f'눈치 숫자 · {rule[1]}';room['public']['event_text']=rule[2]+(f' · {forbid}은 이번 라운드 금지' if forbid else '')
+    elif gid=='chosung':
+        q=gd.get('chosung') or {};initial=str(q.get('initial',''));letters=len(initial.replace(' ',''));start_level=1 if letters<=2 else 0;gd['chosung_level']=start_level;gd['hint_at']=1e18;gd['reveal_category_at']=now()+sec*(.34 if start_level==0 else 0);gd['reveal_hint_at']=now()+sec*(.68 if start_level==1 else .72)
+        for p in pids:
+            a=room['assignments'].get(p)
+            if a:a.setdefault('extra',{})['category']=q.get('cat') if start_level>=1 else None;a['extra']['hint']=None;a['extra']['reveal_level']=start_level
+        room['public']['event_title']='초성 스피드';room['public']['event_text']='초성만 먼저 공개됩니다.' if start_level==0 else f'{q.get("cat","초성")} 분야 · 빠르게 맞혀보세요.'
+    elif gid=='teamsync':
+        _setup_team_battle_round(room)
+
+def _setup_team_battle_round(room):
+    gd=room['game_data'];idx=gd['small_index'];pids=active_pids(room);mode=('sync','number','quiz','chosung')[idx%4];gd['team_mode']=mode;gd['small_stage']='answer';room['submissions']={};room['round_result']=None
+    final=idx==gd['small_total']-1;gd['team_final']=final
+    if mode=='sync':
+        prompt,a,b=random.choice(MATCH_PROMPTS);gd['team_payload']={'prompt':prompt,'a':a,'b':b}
+        for p in pids:make_assignment(room,p,'팀 '+gd['teams'][p],prompt,None,{'team':gd['teams'][p],'mode':mode,'options':[a,b]})
+        room['public']['event_title']='팀 대항전 · 팀 싱크';room['public']['event_text']='팀원과 상의 없이 같은 선택을 노리세요.'
+    elif mode=='number':
+        target=random.randint(3,7);gd['team_payload']={'target':target}
+        for p in pids:make_assignment(room,p,'팀 '+gd['teams'][p],f'우리 팀 평균을 {target}에 가깝게',None,{'team':gd['teams'][p],'mode':mode,'target':target})
+        room['public']['event_title']='팀 대항전 · 숫자';room['public']['event_text']=f'상의 없이 1~9를 골라 팀 평균을 {target}에 가깝게 만드세요.'
+    elif mode=='quiz':
+        q=dict(random.choice(QUIZ_QUESTIONS));opts=list(q['options']);random.shuffle(opts);q['options']=opts;gd['team_payload']=q
+        for p in pids:make_assignment(room,p,'팀 '+gd['teams'][p],q['q'],None,{'team':gd['teams'][p],'mode':mode,'options':opts,'category':q['cat']})
+        room['public']['event_title']='팀 대항전 · 상식';room['public']['event_text']='팀 정답률이 높은 쪽이 승리합니다.'
+    else:
+        q=random.choice(CHOSUNG_PROMPTS);gd['team_payload']=q
+        for p in pids:make_assignment(room,p,'팀 '+gd['teams'][p],q['initial'],None,{'team':gd['teams'][p],'mode':mode,'category':q['cat']})
+        room['public']['event_title']='팀 대항전 · 초성';room['public']['event_text']=f'{q["cat"]} · 팀에서 가장 먼저 정답을 맞혀보세요.'
+    gd['interaction_total']=small_seconds(room);room['interaction_deadline']=now()+small_seconds(room);room['deadline']=room['interaction_deadline']
+
+# Bluff gets a real face-to-face speaking window before voting.
+def _start_bluff_vote(room):
+    gd=room['game_data'];gd['small_stage']='vote';room['submissions']={};cid=gd['claim_id'];text=next(c[1] for c in BLUFF_CLAIMS if c[0]==cid);room['public']['event_title']='판정 시작';room['public']['event_text']='이제 진실인지 거짓인지 선택하세요.'
+    for p in active_pids(room):
+        if p!=gd['bluffer']:make_assignment(room,p,'판정자',text,None,{'vote_options':['truth','lie']})
+    room['interaction_deadline']=now()+small_seconds(room);room['deadline']=room['interaction_deadline']
+
+# Chosung uses stage-based scoring: 3/2/1 + fastest 1.
+_V44_RESOLVE_SMALL=resolve_small
+def resolve_small(room):
+    gid=room.get('game_id')
+    if gid=='chosung':
+        gd=room['game_data'];q=gd['chosung'];subs=room.get('submissions',{});pids=active_pids(room)
+        norm=lambda x:''.join(str(x).strip().lower().split());answers={norm(x) for x in q['answers']};correct=[]
+        for p,v in subs.items():
+            if norm(v.get('text','')) in answers:correct.append((float(v.get('ts',now())),p,int(v.get('reveal_level',2))))
+        correct.sort();ptsmap={}
+        for i,(_,p,level) in enumerate(correct):
+            pts=max(1,3-level)+(1 if i==0 else 0);score(room,p,pts);ptsmap[p]=pts
+        rows=[]
+        for p in pids:
+            v=subs.get(p) or {};ok=p in ptsmap;rows.append({'player':room['players'][p]['name'],'choice':v.get('text') or '미응답','correct':ok,'fastest':bool(correct and p==correct[0][1]),'points':ptsmap.get(p,0)})
+        room['round_result']={'stage':'small_result','title':'정답 '+q['answers'][0],'answers':rows,'winner_ids':[x[1] for x in correct]};gd['small_stage']='result';gd['interaction_total']=4;room['interaction_deadline']=now()+4;room['deadline']=room['interaction_deadline'];room['public']['event_title']='정답 공개';room['public']['event_text']='친구들의 오답까지 함께 공개합니다.';return
+    if gid=='teamsync':return _resolve_team_battle(room)
+    return _V44_RESOLVE_SMALL(room)
+
+def _resolve_team_battle(room):
+    gd=room['game_data'];mode=gd['team_mode'];subs=room.get('submissions',{});pids=active_pids(room);teams=gd['teams'];payload=gd['team_payload'];stats={};rows=[]
+    for t in ('A','B'):stats[t]={'members':[p for p in pids if teams[p]==t],'metric':None}
+    winners=[]
+    if mode=='sync':
+        for t in ('A','B'):
+            vals=[(subs.get(p) or {}).get('choice') for p in stats[t]['members']];cnt=Counter(v for v in vals if v);stats[t]['metric']=max(cnt.values() or [0])/max(1,len(stats[t]['members']))
+        best=max(stats[t]['metric'] for t in ('A','B'));winteams=[t for t in ('A','B') if stats[t]['metric']==best]
+    elif mode=='number':
+        target=payload['target']
+        for t in ('A','B'):
+            vals=[int((subs.get(p) or {}).get('choice',0) or 0) for p in stats[t]['members'] if (subs.get(p) or {}).get('choice')];avg=sum(vals)/len(vals) if vals else 99;stats[t]['metric']=abs(avg-target);stats[t]['avg']=avg
+        best=min(stats[t]['metric'] for t in ('A','B'));winteams=[t for t in ('A','B') if stats[t]['metric']==best]
+    elif mode=='quiz':
+        ans=payload['answer']
+        for t in ('A','B'):
+            m=stats[t]['members'];ok=sum(1 for p in m if (subs.get(p) or {}).get('choice')==ans);stats[t]['metric']=ok/max(1,len(m))
+        best=max(stats[t]['metric'] for t in ('A','B'));winteams=[t for t in ('A','B') if stats[t]['metric']==best]
+    else:
+        norm=lambda x:''.join(str(x).strip().lower().split());answers={norm(x) for x in payload['answers']}
+        for t in ('A','B'):
+            times=[float(v.get('ts',1e18)) for p,v in subs.items() if teams.get(p)==t and norm(v.get('text','')) in answers];stats[t]['metric']=min(times) if times else 1e18
+        best=min(stats[t]['metric'] for t in ('A','B'));winteams=[t for t in ('A','B') if stats[t]['metric']==best and best<1e18]
+        if not winteams:winteams=[]
+    reward=3 if gd.get('team_final') else 2
+    for p in pids:
+        t=teams[p];win=t in winteams
+        if win:score(room,p,reward);winners.append(p)
+        v=subs.get(p) or {};choice=v.get('text') if mode=='chosung' else v.get('choice');rows.append({'player':room['players'][p]['name']+f' · 팀 {t}','choice':choice if choice not in (None,'') else '미응답','correct':win})
+    if len(winteams)==1:title=f'팀 {winteams[0]} 승리 · +{reward}점'
+    elif len(winteams)==2:title='동률 · 두 팀 모두 보상'
+    else:title='이번 종목 승자 없음'
+    room['round_result']={'stage':'small_result','title':title,'answers':rows,'winner_ids':winners};gd['small_stage']='result';gd['interaction_total']=4;room['interaction_deadline']=now()+4;room['deadline']=room['interaction_deadline'];room['public']['event_title']='팀 결과';room['public']['event_text']=title
+
+_V44_HANDLE_SUBMIT=handle_submit
+def handle_submit(room,pid,data):
+    gid=room.get('game_id');gd=room.get('game_data',{})
+    if gid=='bluff' and gd.get('small_stage')=='claim':
+        if pid!=gd.get('bluffer'):raise ValueError('블러퍼만 주장을 선택할 수 있습니다.')
+        cid=str(data.get('choice',''))
+        if cid not in gd.get('claim_choices',[]):raise ValueError('제시된 주장 중 하나를 골라 주세요.')
+        gd['claim_id']=cid;gd['small_stage']='bluff_talk';text=next(c[1] for c in BLUFF_CLAIMS if c[0]==cid);room['public']['event_title']=room['players'][pid]['name']+'의 주장';room['public']['event_text']=text+' · 8초 동안 직접 설득하세요.';room['submissions']={};room['interaction_deadline']=now()+8;room['deadline']=room['interaction_deadline'];return
+    if gid=='chosung':
+        if gd.get('small_stage')!='answer':raise ValueError('지금은 제출할 수 없습니다.')
+        if pid in room.get('submissions',{}):raise ValueError('이미 답을 제출했습니다.')
+        text=str(data.get('text','')).strip()[:24]
+        if not text:raise ValueError('정답을 입력해 주세요.')
+        room['submissions'][pid]={'text':text,'ts':now(),'reveal_level':int(gd.get('chosung_level',2))}
+        if len(room['submissions'])>=len(active_pids(room)):resolve_small(room)
+        return
+    if gid=='teamsync':
+        if gd.get('small_stage')!='answer':raise ValueError('지금은 제출할 수 없습니다.')
+        if pid in room.get('submissions',{}):raise ValueError('이미 제출했습니다.')
+        mode=gd.get('team_mode');ts=now()
+        if mode in ('sync','quiz'):
+            ch=str(data.get('choice',''));opts=(room['assignments'].get(pid) or {}).get('extra',{}).get('options',[])
+            if ch not in opts:raise ValueError('보기 중 하나를 선택하세요.')
+            room['submissions'][pid]={'choice':ch,'ts':ts}
+        elif mode=='number':
+            try:v=int(data.get('choice'))
+            except:raise ValueError('1~9 중 숫자를 고르세요.')
+            if not 1<=v<=9:raise ValueError('1~9 중 숫자를 고르세요.')
+            room['submissions'][pid]={'choice':v,'ts':ts}
+        else:
+            text=str(data.get('text','')).strip()[:24]
+            if not text:raise ValueError('정답을 입력하세요.')
+            room['submissions'][pid]={'text':text,'ts':ts}
+        if len(room['submissions'])>=len(active_pids(room)):resolve_small(room)
+        return
+    return _V44_HANDLE_SUBMIT(room,pid,data)
+
+# ---------- Betrayal contract wrappers ----------
+_V44_ALLIANCE=handle_alliance
+def handle_alliance(room,pid,target):
+    before=(room.get('assignments',{}).get(pid) or {}).get('extra',{}).get('ally');_V44_ALLIANCE(room,pid,target);ass=room['assignments'][pid]
+    if before or ass.get('extra',{}).get('ally')!=target:return
+    cid=uid();contract={'id':cid,'members':[pid,target],'progress':{pid:0,target:0},'done':False,'failed':False};room['game_data'].setdefault('contracts',{})[cid]=contract
+    for p in (pid,target):room['assignments'][p].setdefault('extra',{})['contract_id']=cid;room['assignments'][p]['extra']['contract_text']='공동계약 · 두 사람 모두 개인 목표 1회 성공 시 각 +3점';append_private_notice(room,p,'공동계약 시작 · 둘 다 목표를 1회씩 성공하면 각 +3점')
+
+_V44_BETRAY=handle_betray
+def handle_betray(room,pid):
+    ass=room.get('assignments',{}).get(pid) or {};extra=ass.get('extra',{});cid=extra.get('contract_id');contract=room.get('game_data',{}).get('contracts',{}).get(cid);active_contract=bool(contract and not contract.get('done') and not contract.get('failed'));members=list(contract.get('members',[])) if contract else []
+    _V44_BETRAY(room,pid)
+    if active_contract:
+        contract['failed']=True;score(room,pid,1)
+        for p in members:
+            if p in room['assignments']:room['assignments'][p].setdefault('extra',{})['contract_text']='공동계약 파기';append_private_notice(room,p,'공동계약이 배신으로 파기되었습니다.')
+        room['public']['event_text']='누군가 진행 중인 공동계약을 깨고 추가 배신 보너스를 가져갔습니다.'
+
+# ---------- action / tick / public state ----------
+_V44_DO_ACTION=do_action
+def do_action(room,pid,data):
+    t=data.get('type')
+    if t=='infection_scan':
+        if room.get('phase')!='play' or room.get('paused'):raise ValueError('게임 진행 중에만 사용할 수 있습니다.')
+        return handle_infection_scan(room,pid,data.get('target'))
+    if t=='anon_pass':
+        if room.get('phase')!='play' or room.get('paused'):raise ValueError('게임 진행 중에만 사용할 수 있습니다.')
+        return anon_pass(room,pid)
+    return _V44_DO_ACTION(room,pid,data)
+
+_V44_TICK=tick
+def tick(room):
+    _V44_TICK(room)
+    if room.get('phase')!='play' or room.get('paused'):return
+    gd=room.get('game_data',{});gid=room.get('game_id');ts=now()
+    if gid=='night':
+        act=int(gd.get('night_act',1))
+        if act<2 and ts>=gd.get('night_act2_at',1e18):_night_set_act(room,2)
+        elif act<3 and ts>=gd.get('night_act3_at',1e18):_night_set_act(room,3)
+    elif gid=='infection':
+        inf=len([p for p in gd.get('infected',[]) if p in active_pids(room)]);n=max(1,len(active_pids(room)));should_open=(ts>=gd.get('scan_open_at',1e18) or inf/n>=.45)
+        if not gd.get('scan_used') and not gd.get('scan_open') and should_open:open_infection_scan(room)
+        if gd.get('scan_open') and ts>=gd.get('scan_deadline',1e18):resolve_infection_scan(room)
+    elif gid=='forbidden' and ts>=gd.get('forbidden_reminder_at',1e18):
+        for p in active_pids(room):append_private_notice(room,p,'백그라운드 게임 진행 중 · 화면보다 상대 행동을 보세요. 목표는 그대로 유지됩니다.')
+        gd['forbidden_reminder_at']=ts+300
+    elif gid=='bounty':
+        started=gd.get('v44_started_at',ts);last=gd.get('v44_last_success_at') or started
+        if ts-last>240 and not gd.get('bounty_stuck_notice'):
+            gd['bounty_stuck_notice']=True;room['public']['event_title']='사냥 정체 감지';room['public']['event_text']='다음에 배정되는 제거 조건은 조금 더 자연스럽고 쉬워집니다.'
+    if gid=='bluff' and gd.get('small_stage')=='bluff_talk' and ts>=room.get('interaction_deadline',1e18):_start_bluff_vote(room)
+    if gid=='chosung' and gd.get('small_stage')=='answer':
+        level=int(gd.get('chosung_level',0));q=gd.get('chosung') or {}
+        if level==0 and ts>=gd.get('reveal_category_at',1e18):
+            gd['chosung_level']=1
+            for p in active_pids(room):
+                a=room.get('assignments',{}).get(p)
+                if a:a.setdefault('extra',{})['category']=q.get('cat');a['extra']['reveal_level']=1
+            room['public']['event_title']='분야 공개';room['public']['event_text']=q.get('cat','')+' · 아직 힌트 없이 맞히면 +2점'
+        if int(gd.get('chosung_level',0))<2 and ts>=gd.get('reveal_hint_at',1e18):
+            gd['chosung_level']=2;gd['hint_revealed']=True
+            for p in active_pids(room):
+                a=room.get('assignments',{}).get(p)
+                if a:a.setdefault('extra',{})['category']=q.get('cat');a['extra']['hint']=q.get('hint');a['extra']['reveal_level']=2
+            room['public']['event_title']='힌트 공개';room['public']['event_text']=q.get('hint','')+' · 지금 맞히면 +1점'
+
+_V44_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V44_PUBLIC_GAME_DATA(room,pid);gd=room.get('game_data',{});gid=room.get('game_id')
+    if gid=='night':out['night_act']=gd.get('night_act',1)
+    if gid=='infection':
+        infected=set(gd.get('infected',[]));out.update({'scan_open':bool(gd.get('scan_open')),'scan_voted':pid in gd.get('scan_votes',{}),'scan_votes':len(gd.get('scan_votes',{})),'scan_humans':len([p for p in active_pids(room) if p not in infected]),'scan_result':gd.get('scan_result'),'is_infected':pid in infected})
+    if gid=='quiz':out['quiz_next_level']=gd.get('quiz_next_level')
+    if gid=='teamsync':out['team_mode']=gd.get('team_mode');out['team_final']=gd.get('team_final',False)
+    if gid=='chosung':out['chosung_level']=gd.get('chosung_level',0)
+    return out
+
+_V44_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V44_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.4';return out
+
+_V44_GET=Handler.do_GET
+def _v44_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.4'})
+    return _V44_GET(self)
+Handler.do_GET=_v44_do_get
