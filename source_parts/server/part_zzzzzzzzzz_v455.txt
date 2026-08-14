@@ -1,0 +1,175 @@
+# v4.5.5: small-group Mafia balance for 5-6 players.
+# Goals: prevent clue-intersection auto-solves, guarantee one real discussion for 5 players,
+# and keep special-role information useful without making the town mathematically certain.
+
+GAMES['mafia'].update(
+    desc='5~6명에서도 추리가 살아나도록 핵심 단서·야간 흔적·위장 정보를 섞은 자동 진행 정통 마피아.',
+    guide=[
+        '5명은 마피아1·경찰1·시민3, 6명은 마피아1·경찰1·의사1·시민3으로 진행합니다.',
+        '5명 첫날 밤은 정찰 밤이라 탈락자가 없고, 경찰 조사와 토론 정보만 생성됩니다.',
+        '낮에는 시민팀 중 일부만 마피아를 직접 좁히는 핵심 단서를 받고, 나머지는 야간 행동 흔적을 받습니다.',
+        '마피아는 시민 단서처럼 보이는 위장 카드를 받아 거짓 주장을 만들 수 있습니다. 토론→지목→최후변론→결선투표로 진행합니다.'
+    ]
+)
+
+def _mafia_small(room):
+    return int(room.get('game_data',{}).get('mafia_initial_n') or len(active_pids(room))) in (5,6)
+
+def _mafia_team_label(room,pid):
+    return '마피아' if _mafia_role(room,pid)=='마피아' else '시민팀'
+
+def _mafia_core_clue(room,viewer):
+    gd=room['game_data'];day=int(gd.get('mafia_day',1));alive=mafia_alive(room);maf=[p for p in alive if _mafia_role(room,p)=='마피아']
+    if not maf:return '핵심 단서: 현재 살아있는 마피아가 없습니다.'
+    truth=random.choice(maf);width=3 if day<=1 and len(alive)>=5 else 2
+    pool=[p for p in alive if p not in {viewer,truth}];random.shuffle(pool);cands=[truth]+pool[:max(0,width-1)];random.shuffle(cands)
+    return '핵심 단서: '+(' / '.join(_mafia_name(room,p) for p in cands))+f' 중 최소 한 명은 마피아입니다.'
+
+def _mafia_activity_clue(room,viewer):
+    gd=room['game_data'];alive=[p for p in mafia_alive(room) if p!=viewer];actors=set(gd.get('mafia_actions',{}).keys());size=min(3,len(alive))
+    if not alive:return '야간 흔적: 확인할 수 있는 기록이 없습니다.'
+    # Prefer a mixed group so the clue creates discussion rather than a trivial all/none result.
+    best=None
+    for _ in range(24):
+        cands=random.sample(alive,size);count=sum(1 for p in cands if p in actors)
+        best=(cands,count)
+        if 0<count<size:break
+    cands,count=best
+    names=' / '.join(_mafia_name(room,p) for p in cands)
+    return f'야간 흔적: {names} 중 밤 행동을 실제 제출한 사람은 {count}명입니다. 밤 행동은 마피아뿐 아니라 경찰·의사도 할 수 있습니다.'
+
+def _mafia_small_bluff(room,viewer):
+    alive=[p for p in mafia_alive(room) if p!=viewer]
+    if len(alive)>=3 and random.random()<.55:
+        cands=random.sample(alive,3);names=' / '.join(_mafia_name(room,p) for p in cands)
+        return f'위장 카드: “핵심 단서로 {names} 중 최소 한 명이 마피아라고 받았다”고 주장해 볼 수 있습니다. 이 문장은 시스템 보증 정보가 아닙니다.'
+    cands=random.sample(alive,min(3,len(alive))) if alive else []
+    fake=random.randint(0,max(1,len(cands)-1)) if cands else 0;names=' / '.join(_mafia_name(room,p) for p in cands)
+    return f'위장 카드: “야간 흔적으로 {names} 중 밤 행동 제출자가 {fake}명이었다”고 주장해 볼 수 있습니다. 실제 기록과 다를 수 있습니다.'
+
+def _mafia_small_assign_day_info(room):
+    gd=room['game_data'];day=int(gd.get('mafia_day',1));alive=mafia_alive(room);town=[p for p in alive if _mafia_role(room,p)!='마피아'];citizens=[p for p in town if _mafia_role(room,p)=='시민']
+    # Exactly one ordinary town player receives the alignment clue. This avoids the v4.5.4
+    # failure mode where intersecting several guaranteed-mafia sets immediately identifies Mafia.
+    core_receiver=random.choice(citizens or town) if town else None
+    gd['mafia_core_receiver']=core_receiver
+    police_results=gd.get('mafia_police_results',{})
+    for p in alive:
+        ass=room['assignments'].get(p) or {};role=ass.get('role');extra=ass.setdefault('extra',{});extra['discussion_task']=random.choice(MAFIA_DISCUSSION_TASKS)
+        if role=='마피아':evidence=_mafia_small_bluff(room,p)
+        elif role=='경찰':evidence=police_results.get(p) or '경찰 조사: 이번 밤에는 유효한 조사 결과가 없습니다.'
+        elif role=='의사':
+            protected=gd.get('mafia_actions',{}).get(p);attacked=gd.get('mafia_last_kill_target');blocked=bool(protected and attacked and protected==attacked)
+            evidence='의사 기록: 어젯밤 당신의 보호가 실제 공격을 막았습니다.' if blocked else '의사 기록: 어젯밤 보호 대상에서 직접적인 공격 흔적을 확인하지 못했습니다.'
+        elif p==core_receiver:evidence=_mafia_core_clue(room,p)
+        else:evidence=_mafia_activity_clue(room,p)
+        extra['day_evidence']=evidence
+        append_private_notice(room,p,f'{day}일차 개인 정보 · '+evidence);append_private_notice(room,p,'토론 행동 · '+extra['discussion_task'])
+
+def _mafia_assign_day_info(room):
+    if _mafia_small(room):return _mafia_small_assign_day_info(room)
+    # Keep v4.5.4 behavior for larger groups.
+    gd=room['game_data'];day=int(gd.get('mafia_day',1))
+    for p in mafia_alive(room):
+        ass=room['assignments'].get(p) or {};role=ass.get('role');extra=ass.setdefault('extra',{});extra['discussion_task']=random.choice(MAFIA_DISCUSSION_TASKS)
+        extra['day_evidence']=_mafia_make_bluff_card(room,p) if role=='마피아' else _mafia_make_special_clue(room,p)
+        append_private_notice(room,p,f'{day}일차 토론 단서 · '+extra['day_evidence']);append_private_notice(room,p,'토론 행동 · '+extra['discussion_task'])
+
+_V455_SETUP_MAFIA=setup_mafia
+def setup_mafia(room):
+    _V455_SETUP_MAFIA(room);gd=room['game_data'];gd['mafia_initial_n']=len(active_pids(room));gd['mafia_police_results']={};gd['mafia_scout_night']=gd['mafia_initial_n']==5
+
+
+def start_mafia_night(room):
+    gd=room['game_data'];gd['mafia_stage']='night';gd['mafia_actions']={};gd['mafia_candidates']=[];gd['mafia_nomination_votes']={};gd['mafia_final_votes']={};room['submissions']={};room['votes']={};room['round_result']=None;alive=mafia_alive(room)
+    scout=gd.get('mafia_initial_n')==5 and int(gd.get('mafia_day',1))==1
+    if scout:
+        room['public']['event_title']='1일차 정찰 밤';room['public']['event_text']='첫날은 실제 탈락자가 없습니다. 마피아는 정찰 대상을, 경찰은 조사 대상을 선택합니다.'
+    else:
+        room['public']['event_title']=f'{gd["mafia_day"]}일차 밤';room['public']['event_text']='특수 역할은 자기 화면에서 행동을 고르세요. 시민은 기다립니다.'
+    for p in alive:
+        r=_mafia_role(room,p)
+        if r=='마피아':room['assignments'][p]['mission']='정찰 대상을 고르세요. 첫날에는 실제 탈락이 없습니다.' if scout else '제거할 사람을 고르세요.'
+        elif r=='경찰':room['assignments'][p]['mission']='조사할 사람을 고르세요.'
+        elif r=='의사':room['assignments'][p]['mission']='보호할 사람을 고르세요.'
+        else:room['assignments'][p]['mission']='밤이 지나가기를 기다리세요.'
+    room['interaction_deadline']=now()+20;room['deadline']=room['interaction_deadline']
+
+
+def mafia_night_action(room,pid,target):
+    gd=room['game_data'];alive=mafia_alive(room)
+    if gd.get('mafia_stage')!='night' or pid not in alive:raise ValueError('지금은 밤 행동을 할 수 없습니다.')
+    role=_mafia_role(room,pid)
+    if role not in ('마피아','경찰','의사'):raise ValueError('현재 역할에는 밤 행동이 없습니다.')
+    if pid in gd.setdefault('mafia_actions',{}):raise ValueError('이미 밤 행동을 선택했습니다.')
+    if target not in alive:raise ValueError('살아있는 참가자를 선택하세요.')
+    if role in ('마피아','경찰') and target==pid:raise ValueError('자기 자신은 선택할 수 없습니다.')
+    if role=='마피아' and _mafia_role(room,target)=='마피아':raise ValueError('같은 마피아는 선택할 수 없습니다.')
+    if role=='의사' and target==pid and _mafia_small(room):raise ValueError('5~6명 게임에서는 의사가 자기 자신을 보호할 수 없습니다.')
+    if role=='의사' and target==gd.get('doctor_last_target'):raise ValueError('의사는 같은 사람을 연속으로 보호할 수 없습니다.')
+    gd['mafia_actions'][pid]=target
+    required=[p for p in alive if _mafia_role(room,p) in ('마피아','경찰','의사')]
+    if all(p in gd['mafia_actions'] for p in required):resolve_mafia_night(room)
+
+
+def resolve_mafia_night(room):
+    gd=room['game_data'];actions=gd.get('mafia_actions',{});alive=mafia_alive(room);maf=[p for p in alive if _mafia_role(room,p)=='마피아'];kills=[actions[p] for p in maf if p in actions];kill=None
+    if kills:
+        c=Counter(kills);mx=max(c.values());kill=random.choice([p for p,v in c.items() if v==mx])
+    gd['mafia_last_kill_target']=kill
+    doctor=next((p for p in alive if _mafia_role(room,p)=='의사'),None);saved=actions.get(doctor) if doctor else None
+    if doctor and saved:gd['doctor_last_target']=saved
+    police=next((p for p in alive if _mafia_role(room,p)=='경찰'),None)
+    if police and police in actions:
+        t=actions[police];is_maf=_mafia_role(room,t)=='마피아';msg=f'경찰 조사: {_mafia_name(room,t)}는 '+('마피아입니다.' if is_maf else '마피아가 아닙니다.');gd.setdefault('mafia_police_results',{})[police]=msg;append_private_notice(room,police,msg)
+    scout=gd.get('mafia_initial_n')==5 and int(gd.get('mafia_day',1))==1
+    if scout:
+        text='첫날 정찰 밤이 끝났습니다. 아무도 탈락하지 않았습니다.'
+    elif kill and kill!=saved:
+        room['players'][kill]['alive']=False
+        reveal=_mafia_team_label(room,kill) if _mafia_small(room) else _mafia_role(room,kill)
+        text=f'{_mafia_name(room,kill)}님이 밤에 제거되었습니다. 공개 정보: {reveal}.'
+    else:text='지난밤 아무도 제거되지 않았습니다.'
+    _mafia_assign_day_info(room)
+    room['round_result']={'stage':'mafia_morning','title':'아침','text':text};room['public']['event_title']='☀️ 아침';room['public']['event_text']=text+' 개인 정보는 종류가 다를 수 있습니다. 서로 주장하며 모순을 찾으세요.'
+    if mafia_check_win(room):return
+    gd['mafia_stage']='morning';room['interaction_deadline']=now()+10;room['deadline']=room['interaction_deadline']
+
+
+def start_mafia_discuss(room):
+    gd=room['game_data'];gd['mafia_stage']='discuss';room['round_result']=None;sec=mafia_discussion_seconds(room)
+    room['public']['event_title']=f'{gd["mafia_day"]}일차 토론 · {sec}초'
+    if _mafia_small(room):room['public']['event_text']='핵심 단서는 하루에 한 명에게만 주어집니다. 다른 시민은 야간 흔적이나 특수직업 정보를 받습니다. 마피아의 위장 주장까지 비교해 모순을 찾으세요.'
+    else:room['public']['event_text']='각자 가진 정보는 서로 다릅니다. 공개할지 숨길지 판단하고 주장끼리 모순되는 부분을 찾으세요.'
+    room['interaction_deadline']=now()+sec;room['deadline']=room['interaction_deadline'];gd['mafia_discuss_total']=sec;gd['mafia_discuss_warning']=False
+
+
+def resolve_mafia_final_vote(room):
+    gd=room['game_data'];alive=mafia_alive(room);candidates=gd.get('mafia_candidates',[]);votes={p:t for p,t in gd.get('mafia_final_votes',{}).items() if p in alive and (t in candidates or t=='abstain')};cnt=Counter(votes.values());elim=None
+    candidate_counts={p:cnt[p] for p in candidates};best=max(candidate_counts.values() or [0]);tops=[p for p,v in candidate_counts.items() if v==best and best>0];abstain=cnt.get('abstain',0)
+    if len(tops)==1 and (not gd.get('mafia_abstain_allowed') or best>abstain):elim=tops[0]
+    if elim:
+        room['players'][elim]['alive']=False;reveal=_mafia_team_label(room,elim) if _mafia_small(room) else _mafia_role(room,elim);text=f'{_mafia_name(room,elim)}님이 탈락했습니다. 공개 정보: {reveal}.';gd['mafia_no_elim_streak']=0
+    else:
+        text='결선 결과 한 명을 확정하지 못해 아무도 탈락하지 않았습니다.';gd['mafia_no_elim_streak']=gd.get('mafia_no_elim_streak',0)+1
+    rows=[{'name':_mafia_name(room,p),'count':cnt[p]} for p in candidates]
+    if gd.get('mafia_abstain_allowed'):rows.append({'name':'살려둔다','count':abstain})
+    room['round_result']={'stage':'mafia_vote_result','title':'결선 결과','text':text,'counts':rows};room['public']['event_title']='투표 결과';room['public']['event_text']=text
+    if mafia_check_win(room):return
+    gd['mafia_stage']='vote_result';room['interaction_deadline']=now()+7;room['deadline']=room['interaction_deadline']
+
+_V455_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V455_PUBLIC_GAME_DATA(room,pid);gd=room.get('game_data',{})
+    if room.get('game_id')=='mafia':out['small_balance']=_mafia_small(room);out['scout_night']=bool(gd.get('mafia_initial_n')==5 and int(gd.get('mafia_day',1))==1 and gd.get('mafia_stage')=='night')
+    return out
+
+_V455_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V455_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.5';return out
+
+_V455_GET=Handler.do_GET
+def _v455_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.5'})
+    return _V455_GET(self)
+Handler.do_GET=_v455_do_get
