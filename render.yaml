@@ -3,7 +3,7 @@ services:
     name: bamnolja-party-game
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt && python -m py_compile server.py content_pack_v3.py
+    buildCommand: pip install -r requirements.txt && python -c "import content_pack_v3, server"
     startCommand: python server.py
     healthCheckPath: /api/health
     envVars:
