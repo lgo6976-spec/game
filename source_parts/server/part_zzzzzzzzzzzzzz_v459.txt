@@ -1,0 +1,60 @@
+# v4.5.9: Chosung is now a real speed-input game.
+# Wrong answers give private immediate feedback and can be retried.
+# Correct answers lock only that player. Team Chosung ends on the first correct answer.
+
+
+def _v459_norm_answer(value):
+    # Ignore spaces and punctuation so harmless mobile-keyboard formatting does not cause a false wrong answer.
+    return ''.join(ch for ch in str(value or '').strip().lower() if ch.isalnum())
+
+
+def _v459_set_chosung_feedback(room,pid,ok,text,attempts):
+    ass=room.get('assignments',{}).get(pid)
+    if not ass:return
+    extra=ass.setdefault('extra',{})
+    extra['chosung_feedback']={'ok':bool(ok),'text':str(text),'attempts':int(attempts),'nonce':uid()}
+
+
+def _v459_chosung_submit(room,pid,text,team=False):
+    gd=room.get('game_data',{})
+    if room.get('phase')!='play' or room.get('paused') or gd.get('small_stage')!='answer':
+        raise ValueError('지금은 정답을 제출할 수 없습니다.')
+    if pid not in active_pids(room):raise ValueError('현재 참가 중인 플레이어가 아닙니다.')
+    if pid in room.get('submissions',{}):raise ValueError('이미 정답을 맞혔습니다.')
+    text=str(text or '').strip()[:24]
+    if not text:raise ValueError('정답을 입력해 주세요.')
+    ass=room.get('assignments',{}).get(pid) or {};extra=ass.setdefault('extra',{});attempts=int(extra.get('chosung_attempts',0))+1;extra['chosung_attempts']=attempts
+    q=(gd.get('team_payload') if team else gd.get('chosung')) or {}
+    answers={_v459_norm_answer(x) for x in q.get('answers',[]) if _v459_norm_answer(x)}
+    normalized=_v459_norm_answer(text)
+    if not normalized or normalized not in answers:
+        _v459_set_chosung_feedback(room,pid,False,'오답 · 바로 다시 도전하세요.',attempts)
+        return False
+    level=int(gd.get('chosung_level',2)) if not team else 0
+    room.setdefault('submissions',{})[pid]={'text':text,'ts':now(),'reveal_level':level,'attempts':attempts}
+    _v459_set_chosung_feedback(room,pid,True,'정답! 제출 완료.',attempts)
+    if team:
+        # Team Chosung is explicitly a race: once somebody gets it right, a later answer cannot beat that timestamp.
+        resolve_small(room)
+    elif len(room['submissions'])>=len(active_pids(room)):
+        resolve_small(room)
+    return True
+
+
+_V459_HANDLE_SUBMIT=handle_submit
+def handle_submit(room,pid,data):
+    gid=room.get('game_id');gd=room.get('game_data',{})
+    if gid=='chosung':return _v459_chosung_submit(room,pid,data.get('text'),False)
+    if gid=='teamsync' and gd.get('team_mode')=='chosung':return _v459_chosung_submit(room,pid,data.get('text'),True)
+    return _V459_HANDLE_SUBMIT(room,pid,data)
+
+
+_V459_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V459_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.9';return out
+
+_V459_GET=Handler.do_GET
+def _v459_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.9'})
+    return _V459_GET(self)
+Handler.do_GET=_v459_do_get
