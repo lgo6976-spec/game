@@ -1,0 +1,81 @@
+<style>
+/* v4.5.8: stable text-entry UI for Chosung rounds */
+.chosungSubmit458{display:flex;gap:8px;align-items:stretch}.chosungSubmit458 input{flex:1;min-width:0}.chosungSubmit458 .btn{flex:0 0 auto;min-width:72px}.chosungSubmit458.sending{opacity:.72}.chosungDraftNote458{font-size:10px;color:var(--muted);margin-top:6px}.chosungHint458{margin:8px 0;padding:10px 11px;border:1px dashed var(--line);border-radius:12px;font-size:12px;color:var(--muted)}
+</style>
+<script>
+// Keep the typed answer outside the polled DOM so category/hint reveals can never erase it.
+let _chosungDraft458={};
+let _chosungComposing458=false;
+let _chosungSending458=false;
+function chosungKey458(team=false){let gd=S?.game_data_public||{};return [S?.room||'',S?.game_id||'',S?.round_no||0,gd.small_index||0,team?'team':'solo'].join('|')}
+function saveChosungDraft458(v,team=false){_chosungDraft458[chosungKey458(team)]=String(v??'')}
+function clearChosungDraft458(team=false){delete _chosungDraft458[chosungKey458(team)]}
+function chosungDraft458(team=false){return _chosungDraft458[chosungKey458(team)]||''}
+function chosungCompositionStart458(){_chosungComposing458=true}
+function chosungCompositionEnd458(el,team=false){_chosungComposing458=false;saveChosungDraft458(el?.value||'',team)}
+function handleChosungKey458(ev,team=false){
+  if(ev.key!=='Enter')return;
+  // Android/Samsung/Gboard and iOS Korean IME may emit Enter while the last syllable is still composing.
+  if(ev.isComposing||_chosungComposing458||ev.keyCode===229)return;
+  ev.preventDefault();submitChosung458(team);
+}
+function updateChosungMeta458(team=false){
+  let a=S.assignment||{},gd=S.game_data_public||{};
+  if(team){
+    let cat=document.getElementById('teamChosungCat458');if(cat)cat.textContent=a.extra?.category||'팀 초성';
+    return;
+  }
+  let cat=document.getElementById('chosungCat458');if(cat)cat.textContent=a.extra?.category||'분야 공개 전';
+  let hint=document.getElementById('chosungHint458');if(hint){let h=a.extra?.hint;hint.innerHTML=h?`<b>힌트 공개</b> · ${esc(h)}<br>힌트 후 정답은 보상이 조금 줄어듭니다.`:`아직 힌트 없음 · 지금 맞히면 더 높은 점수`;}
+}
+async function submitChosung458(team=false){
+  if(_chosungSending458)return;
+  let id=team?'teamChosungAnswer458':'chosungAnswer458',el=document.getElementById(id),text=(el?.value||chosungDraft458(team)||'').trim();
+  if(!text){toast('정답을 입력해 주세요');el?.focus();return}
+  // Force the latest IME-committed value into the draft before the async request starts.
+  saveChosungDraft458(text,team);_chosungSending458=true;
+  let row=document.getElementById(team?'teamChosungRow458':'chosungRow458'),btn=document.getElementById(team?'teamChosungBtn458':'chosungBtn458');
+  row?.classList.add('sending');if(btn){btn.disabled=true;btn.textContent='제출 중'}
+  try{await act('submit',{text})}finally{
+    _chosungSending458=false;
+    // If the server has not moved us to submitted/result, restore the editable state without losing the answer.
+    if(S?.phase==='play'&&!S?.game_data_public?.my_submitted){
+      row?.classList.remove('sending');if(btn){btn.disabled=false;btn.textContent='제출'}
+      let current=document.getElementById(id);if(current&&!current.value)current.value=chosungDraft458(team);
+    }
+  }
+}
+function renderSoloChosung458(){
+  let d=$('privateActions'),m=$('minorActions'),a=S.assignment||{},gd=S.game_data_public||{},stage=gd.small_stage,submitted=gd.my_submitted,key=chosungKey458(false);
+  m.innerHTML='';
+  if(stage==='result'){clearChosungDraft458(false);d.dataset.sig='chosung458-result-'+key;d.innerHTML='<div class="notice">결과 공개 중 · 잠시 뒤 다음 라운드가 시작됩니다.</div>';return}
+  if(submitted){clearChosungDraft458(false);d.dataset.sig='chosung458-submitted-'+key;d.innerHTML=`<div class="notice">정답 제출 완료 · ${smallWaiting()}</div>`;return}
+  let sig='chosung458-edit-'+key;
+  if(d.dataset.sig!==sig){
+    let draft=chosungDraft458(false);d.dataset.sig=sig;
+    d.innerHTML=`<div class="chosungHero"><div class="cat" id="chosungCat458"></div><div class="initial">${esc(a.mission||'')}</div></div><div class="chosungHint458" id="chosungHint458"></div><div class="chosungSubmit458" id="chosungRow458"><input id="chosungAnswer458" maxlength="24" autocomplete="off" enterkeyhint="send" placeholder="정답 입력" value="${esc(draft)}" oninput="saveChosungDraft458(this.value,false)" oncompositionstart="chosungCompositionStart458()" oncompositionend="chosungCompositionEnd458(this,false)" onkeydown="handleChosungKey458(event,false)"><button id="chosungBtn458" class="btn primary" onclick="submitChosung458(false)">제출</button></div><div class="chosungDraftNote458">분야·힌트가 공개돼도 작성 중인 답은 유지됩니다.</div>`;
+    setTimeout(()=>{let el=document.getElementById('chosungAnswer458');if(el&&document.activeElement!==el){el.focus();let n=el.value.length;try{el.setSelectionRange(n,n)}catch{}}},30);
+  }
+  updateChosungMeta458(false);
+}
+function renderTeamChosung458(){
+  let d=$('privateActions'),m=$('minorActions'),a=S.assignment||{},gd=S.game_data_public||{},stage=gd.small_stage,submitted=gd.my_submitted,key=chosungKey458(true);m.innerHTML='';
+  if(stage==='result'){clearChosungDraft458(true);d.dataset.sig='teamchosung458-result-'+key;d.innerHTML='<div class="notice">팀 결과 공개 중입니다.</div>';return}
+  if(submitted){clearChosungDraft458(true);d.dataset.sig='teamchosung458-submitted-'+key;d.innerHTML=`<div class="notice">제출 완료 · ${gd.submitted||0}/${gd.needed||0}</div>`;return}
+  let sig='teamchosung458-edit-'+key;
+  if(d.dataset.sig!==sig){let draft=chosungDraft458(true);d.dataset.sig=sig;d.innerHTML=`<div class="teamModeCard"><strong id="teamChosungCat458">팀 초성</strong><span>팀에서 가장 빠른 정답이 중요합니다.</span></div><div class="chosungHero"><div class="initial">${esc(a.mission||'')}</div></div><div class="chosungSubmit458" id="teamChosungRow458"><input id="teamChosungAnswer458" maxlength="24" autocomplete="off" enterkeyhint="send" placeholder="정답 입력" value="${esc(draft)}" oninput="saveChosungDraft458(this.value,true)" oncompositionstart="chosungCompositionStart458()" oncompositionend="chosungCompositionEnd458(this,true)" onkeydown="handleChosungKey458(event,true)"><button id="teamChosungBtn458" class="btn primary" onclick="submitChosung458(true)">제출</button></div>`;setTimeout(()=>{let el=document.getElementById('teamChosungAnswer458');if(el&&document.activeElement!==el){el.focus();let n=el.value.length;try{el.setSelectionRange(n,n)}catch{}}},30)}
+  updateChosungMeta458(true);
+}
+
+// Intercept only text-entry Chosung rounds. All other small-game renderers stay unchanged.
+const _v458RenderSmallActions=renderSmallActions;
+renderSmallActions=function(){
+  if(S?.game_id==='chosung')return renderSoloChosung458();
+  if(S?.game_id==='teamsync'&&S?.game_data_public?.team_mode==='chosung')return renderTeamChosung458();
+  return _v458RenderSmallActions();
+};
+
+// Compatibility aliases: any older inline button/Enter handler that survives a cached DOM still uses the stable submitter.
+submitChosung=function(){return submitChosung458(false)};
+submitTeamWord=function(){return submitChosung458(true)};
+</script>
