@@ -1,0 +1,27 @@
+<style>
+.chosungFeedback459{margin:8px 0;padding:10px 11px;border-radius:12px;font-size:12px;font-weight:900}.chosungFeedback459.bad{background:rgba(255,103,109,.10);border:1px solid rgba(255,103,109,.28);color:#ffc1c4}.chosungFeedback459.good{background:rgba(57,207,157,.10);border:1px solid rgba(57,207,157,.28);color:#9ae9ce}.chosungAttempts459{font-size:10px;color:var(--muted);margin-top:5px}.chosungSubmit458 input.wrong459{animation:wrong459 .18s linear 0s 2;border-color:var(--danger)}@keyframes wrong459{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+</style>
+<script>
+let _chosungFeedbackNonce459={};
+function readChosungFeedback459(){return S?.assignment?.extra?.chosung_feedback||null}
+function renderChosungFeedback459(team=false){
+  let f=readChosungFeedback459(),box=document.getElementById(team?'teamChosungFeedback459':'chosungFeedback459'),id=team?'teamChosungAnswer458':'chosungAnswer458';if(!box)return;
+  if(!f){box.className='hidden';box.textContent='';return}
+  box.className='chosungFeedback459 '+(f.ok?'good':'bad');box.innerHTML=`${f.ok?'✓ ':'↻ '}${esc(f.text||'')}${f.attempts?`<div class="chosungAttempts459">${f.attempts}번째 시도</div>`:''}`;
+  let key=chosungKey458(team),seen=_chosungFeedbackNonce459[key];if(!f.ok&&f.nonce&&seen!==f.nonce){_chosungFeedbackNonce459[key]=f.nonce;let el=document.getElementById(id);if(el){el.classList.remove('wrong459');void el.offsetWidth;el.classList.add('wrong459');el.select();setTimeout(()=>el.focus(),20)}vibrate([35,25,35]);sfx('fail')}
+  if(f.ok&&f.nonce&&seen!==f.nonce){_chosungFeedbackNonce459[key]=f.nonce;vibrate([35,20,60]);sfx('success')}
+}
+const _v459RenderSolo=renderSoloChosung458;
+renderSoloChosung458=function(){_v459RenderSolo();let d=$('privateActions');if(S?.game_id!=='chosung')return;if(S?.game_data_public?.small_stage==='answer'&&!S?.game_data_public?.my_submitted){let row=document.getElementById('chosungRow458');if(row&&!document.getElementById('chosungFeedback459'))row.insertAdjacentHTML('beforebegin','<div id="chosungFeedback459" class="hidden"></div>');renderChosungFeedback459(false)}};
+const _v459RenderTeam=renderTeamChosung458;
+renderTeamChosung458=function(){_v459RenderTeam();if(S?.game_id!=='teamsync'||S?.game_data_public?.team_mode!=='chosung')return;if(S?.game_data_public?.small_stage==='answer'&&!S?.game_data_public?.my_submitted){let row=document.getElementById('teamChosungRow458');if(row&&!document.getElementById('teamChosungFeedback459'))row.insertAdjacentHTML('beforebegin','<div id="teamChosungFeedback459" class="hidden"></div>');renderChosungFeedback459(true)}};
+
+// Make submit feel immediate: keep the same field, preserve text on failure, clear/select it only after a real server response.
+submitChosung458=async function(team=false){
+  if(_chosungSending458)return;let id=team?'teamChosungAnswer458':'chosungAnswer458',el=document.getElementById(id),text=(el?.value||chosungDraft458(team)||'').trim();if(!text){toast('정답을 입력해 주세요');el?.focus();return}
+  saveChosungDraft458(text,team);_chosungSending458=true;let btn=document.getElementById(team?'teamChosungBtn458':'chosungBtn458');if(btn){btn.disabled=true;btn.textContent='확인 중'}
+  let beforeNonce=readChosungFeedback459()?.nonce;
+  try{await act('submit',{text});await new Promise(r=>setTimeout(r,70));await refresh();let f=readChosungFeedback459();if(f&&f.nonce!==beforeNonce&&!f.ok){let current=document.getElementById(id);if(current){current.value='';saveChosungDraft458('',team);current.focus()}}else if(f?.ok){clearChosungDraft458(team)}}catch(e){toast(e.message||'제출에 실패했습니다');let current=document.getElementById(id);if(current&&!current.value)current.value=chosungDraft458(team)}finally{_chosungSending458=false;let b=document.getElementById(team?'teamChosungBtn458':'chosungBtn458');if(b&&!S?.game_data_public?.my_submitted){b.disabled=false;b.textContent='제출'}}
+};
+submitChosung=function(){return submitChosung458(false)};submitTeamWord=function(){return submitChosung458(true)};
+</script>
