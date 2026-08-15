@@ -1,0 +1,10 @@
+# v4.5.8: Chosung input stability release marker.
+_V458_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V458_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.8';return out
+
+_V458_GET=Handler.do_GET
+def _v458_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.8'})
+    return _V458_GET(self)
+Handler.do_GET=_v458_do_get
