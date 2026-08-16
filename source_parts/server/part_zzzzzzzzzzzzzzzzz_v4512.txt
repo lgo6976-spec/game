@@ -1,0 +1,128 @@
+# v4.5.12: Forbidden Action anti-stall flow.
+# Each player gets a fresh target + mission every 5 minutes even without success.
+# Manual target/mission change is available 3 times per game.
+
+FORBIDDEN_ROTATE_SECONDS=300
+FORBIDDEN_MANUAL_REROLLS=3
+
+
+def _forbidden_rotate_player(room,pid,reason='auto'):
+    ass=room.get('assignments',{}).get(pid)
+    if not ass or ass.get('role')!='유도자' or pid not in active_pids(room):return False
+    old_target=ass.get('target');old_mission=str(ass.get('mission') or '')
+    candidates=[p for p in active_pids(room) if p!=pid and p!=old_target]
+    if not candidates:candidates=[p for p in active_pids(room) if p!=pid]
+    new_target=random.choice(candidates) if candidates else None
+    new_mission=target_mission(room,gid='forbidden')
+    # Recent-content avoidance already exists, but make a few extra attempts to avoid an exact repeat.
+    for _ in range(4):
+        if new_mission!=old_mission:break
+        new_mission=target_mission(room,gid='forbidden')
+    extra=ass.setdefault('extra',{})
+    left=int(extra.get('rerolls_left',FORBIDDEN_MANUAL_REROLLS))
+    ass['target']=new_target;ass['mission']=new_mission
+    extra['rerolls_left']=left;extra['assignment_version']=uid();extra['forbidden_next_rotate_at']=now()+FORBIDDEN_ROTATE_SECONDS;extra['forbidden_rotate_warned']=False;extra['forbidden_rotation_count']=int(extra.get('forbidden_rotation_count',0))+1
+    msg='5분이 지나 대상과 미션이 자동으로 바뀌었습니다.' if reason=='auto' else '대상과 미션을 새로 바꿨습니다.' if reason=='manual' else '성공! 새 대상과 미션이 배정되었습니다.'
+    append_private_notice(room,pid,msg)
+    return True
+
+
+_V4512_SETUP_GAME=setup_game
+def setup_game(room,replay=False):
+    out=_V4512_SETUP_GAME(room,replay)
+    if room.get('game_id')=='forbidden':
+        gd=room.setdefault('game_data',{});gd['forbidden_reminder_at']=1e18
+        for pid in active_pids(room):
+            ass=room.get('assignments',{}).get(pid)
+            if ass and ass.get('role')=='유도자':
+                extra=ass.setdefault('extra',{});extra['rerolls_left']=FORBIDDEN_MANUAL_REROLLS;extra['forbidden_next_rotate_at']=None;extra['forbidden_rotate_warned']=False;extra['forbidden_rotation_count']=0
+    return out
+
+
+_V4512_ENTER_PLAY=enter_play
+def enter_play(room):
+    out=_V4512_ENTER_PLAY(room)
+    if room.get('game_id')=='forbidden' and room.get('phase')=='play':
+        ts=now();room.setdefault('game_data',{})['forbidden_reminder_at']=1e18
+        for pid in active_pids(room):
+            ass=room.get('assignments',{}).get(pid)
+            if ass and ass.get('role')=='유도자':
+                extra=ass.setdefault('extra',{});extra['forbidden_next_rotate_at']=ts+FORBIDDEN_ROTATE_SECONDS;extra['forbidden_rotate_warned']=False
+    return out
+
+
+_V4512_APPLY_SUCCESS=apply_success
+def apply_success(room,pid,target,gid,assignment_version=None):
+    ok=_V4512_APPLY_SUCCESS(room,pid,target,gid,assignment_version)
+    if ok and gid=='forbidden' and room.get('phase')=='play':
+        # Base success already gives a new mission/target; keep it, but restart this player's 5-minute clock.
+        ass=room.get('assignments',{}).get(pid) or {};extra=ass.setdefault('extra',{});extra['forbidden_next_rotate_at']=now()+FORBIDDEN_ROTATE_SECONDS;extra['forbidden_rotate_warned']=False;extra['forbidden_rotation_count']=int(extra.get('forbidden_rotation_count',0))+1
+        append_private_notice(room,pid,'성공! 현재 새 대상/미션은 최대 5분 동안 유지됩니다.')
+    return ok
+
+
+_V4512_HANDLE_REROLL=handle_reroll
+def handle_reroll(room,pid):
+    if room.get('game_id')!='forbidden':return _V4512_HANDLE_REROLL(room,pid)
+    if room.get('phase')!='play' or room.get('paused'):raise ValueError('게임 진행 중에만 미션을 바꿀 수 있습니다.')
+    ass=room.get('assignments',{}).get(pid) or {}
+    if ass.get('role')!='유도자':raise ValueError('현재 역할에서는 미션 교체를 사용할 수 없습니다.')
+    if any(p.get('from')==pid for p in room.get('pending',{}).values()):raise ValueError('성공 확인이 끝난 뒤 바꿔 주세요.')
+    extra=ass.setdefault('extra',{});left=int(extra.get('rerolls_left',0))
+    if left<=0:raise ValueError('이번 판 수동 교체 3회를 모두 사용했습니다.')
+    extra['rerolls_left']=left-1
+    if not _forbidden_rotate_player(room,pid,'manual'):raise ValueError('지금은 미션을 바꿀 수 없습니다.')
+    room['assignments'][pid].setdefault('extra',{})['rerolls_left']=left-1
+    room['public']['event_title']='비밀 미션 교체';room['public']['event_text']='누군가 대상과 미션을 새로 받았습니다.'
+
+
+_V4512_TICK=tick
+def tick(room):
+    _V4512_TICK(room)
+    if room.get('game_id')!='forbidden' or room.get('phase')!='play' or room.get('paused'):return
+    ts=now();changed=0
+    for pid in list(active_pids(room)):
+        ass=room.get('assignments',{}).get(pid)
+        if not ass or ass.get('role')!='유도자':continue
+        extra=ass.setdefault('extra',{});deadline=extra.get('forbidden_next_rotate_at')
+        if not deadline:
+            deadline=ts+FORBIDDEN_ROTATE_SECONDS;extra['forbidden_next_rotate_at']=deadline
+        rem=float(deadline)-ts
+        if rem<=30 and rem>0 and not extra.get('forbidden_rotate_warned'):
+            extra['forbidden_rotate_warned']=True;append_private_notice(room,pid,'⏱ 30초 뒤 대상과 미션이 자동으로 바뀝니다.')
+        if rem<=0 and _forbidden_rotate_player(room,pid,'auto'):changed+=1
+    if changed:
+        room['public']['event_title']='🔄 미션 자동 교체';room['public']['event_text']='5분이 지나 일부 플레이어의 대상과 미션이 새로 배정되었습니다. 각자 휴대폰을 확인하세요.'
+
+
+_V4512_DO_ACTION=do_action
+def do_action(room,pid,data):
+    if room.get('game_id')=='forbidden' and data.get('type')=='pause':
+        was_paused=bool(room.get('paused'));paused_at=room.get('paused_at');resume_ts=now();out=_V4512_DO_ACTION(room,pid,data)
+        if was_paused and not room.get('paused') and paused_at:
+            delta=max(0,resume_ts-float(paused_at))
+            for ass in room.get('assignments',{}).values():
+                extra=ass.get('extra') or {}
+                if extra.get('forbidden_next_rotate_at'):extra['forbidden_next_rotate_at']+=delta
+        return out
+    return _V4512_DO_ACTION(room,pid,data)
+
+
+_V4512_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V4512_PUBLIC_GAME_DATA(room,pid)
+    if room.get('game_id')=='forbidden':
+        ass=room.get('assignments',{}).get(pid) or {};extra=ass.get('extra') or {};ref=float(room.get('paused_at') or now()) if room.get('paused') else now();deadline=extra.get('forbidden_next_rotate_at')
+        out.update({'forbidden_rotate_remaining':max(0,float(deadline)-ref) if deadline else FORBIDDEN_ROTATE_SECONDS,'forbidden_rerolls_left':int(extra.get('rerolls_left',0)),'forbidden_rotation_count':int(extra.get('forbidden_rotation_count',0))})
+    return out
+
+
+_V4512_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V4512_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.12';return out
+
+_V4512_GET=Handler.do_GET
+def _v4512_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.12'})
+    return _V4512_GET(self)
+Handler.do_GET=_v4512_do_get
