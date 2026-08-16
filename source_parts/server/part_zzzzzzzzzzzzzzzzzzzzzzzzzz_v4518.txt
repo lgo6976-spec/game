@@ -1,0 +1,43 @@
+# v4.5.18: visible Mafia discussion skip with first-day faster threshold.
+
+
+def _mafia_skip_threshold(room):
+    day=int(room.get('game_data',{}).get('mafia_day',1))
+    return 20 if day==1 else 30
+
+
+def _mafia_skip_discussion(room,pid):
+    gd=room.get('game_data',{})
+    if room.get('phase')!='play' or room.get('paused'):raise ValueError('게임 진행 중에만 사용할 수 있습니다.')
+    if not _mafia_host(room,pid):raise ValueError('방장만 토론을 마감할 수 있습니다.')
+    if gd.get('mafia_stage')!='discuss':raise ValueError('지금은 토론 시간이 아닙니다.')
+    elapsed=now()-float(gd.get('mafia_discuss_started_at') or now())
+    threshold=_mafia_skip_threshold(room)
+    if elapsed<threshold:raise ValueError(f'최소 {threshold}초는 토론한 뒤 바로 지목할 수 있습니다.')
+    start_mafia_nomination(room)
+
+
+_V4518_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V4518_PUBLIC_GAME_DATA(room,pid);gd=room.get('game_data',{})
+    if room.get('game_id')=='mafia' and gd.get('mafia_stage')=='discuss':
+        ref=(room.get('paused_at') if room.get('paused') and room.get('paused_at') else now())
+        elapsed=max(0,ref-float(gd.get('mafia_discuss_started_at') or ref))
+        threshold=_mafia_skip_threshold(room)
+        host=bool(_mafia_host(room,pid))
+        out['skip_threshold']=threshold
+        out['skip_available_in']=max(0,int(threshold-elapsed+0.999))
+        out['can_skip_discussion']=bool(host and not room.get('paused') and elapsed>=threshold)
+        out['show_skip_discussion']=host
+    return out
+
+
+_V4518_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V4518_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.18';return out
+
+_V4518_GET=Handler.do_GET
+def _v4518_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.18'})
+    return _V4518_GET(self)
+Handler.do_GET=_v4518_do_get
