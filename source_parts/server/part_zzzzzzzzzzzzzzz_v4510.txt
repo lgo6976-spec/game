@@ -1,0 +1,10 @@
+# v4.5.10: frontend quiz option selection fix release marker.
+_V4510_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V4510_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.10';return out
+
+_V4510_GET=Handler.do_GET
+def _v4510_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.10'})
+    return _V4510_GET(self)
+Handler.do_GET=_v4510_do_get
