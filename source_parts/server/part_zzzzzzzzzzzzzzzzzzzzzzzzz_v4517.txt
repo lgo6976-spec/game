@@ -1,0 +1,94 @@
+# v4.5.17: first-day Mafia is truly information-free and faster.
+
+GAMES['mafia'].update(
+    guide=[
+        '첫날 밤은 전원 행동 없이 역할만 확인합니다.',
+        '첫날 낮은 시스템 단서 없이 서로의 말과 행동만으로 토론합니다.',
+        '2일차 밤부터 마피아 제거·경찰 조사·의사 보호가 시작됩니다.',
+        '낮에는 토론→1차 지목→최후변론→결선투표 순서로 진행합니다.'
+    ]
+)
+
+MAFIA_FIRST_DAY_TASKS=[
+    '첫 토론에서는 한 명의 첫인상이나 말투 변화만 관찰해 보세요.',
+    '누가 가장 빨리 다른 사람을 의심하기 시작하는지 기억하세요.',
+    '누가 질문에는 답하지 않고 다른 사람 이야기로 돌리는지 보세요.',
+    '한 명에게 오늘 첫 의심 근거를 직접 물어보세요.',
+    '처음 20초는 듣고, 이후 가장 애매했던 주장 하나를 다시 물어보세요.',
+    '누가 시민팀처럼 보이는 이유 하나와 의심되는 이유 하나를 각각 생각해 보세요.'
+]
+
+
+def _mafia_first_day_neutral_info(room):
+    # No alignment clue, night-action trace, police result, doctor result, or Mafia-only fake clue on Day 1.
+    # Everyone receives only a neutral discussion prompt so the first vote is based on social deduction.
+    for p in mafia_alive(room):
+        ass=(room.get('assignments',{}).get(p) or {})
+        extra=ass.setdefault('extra',{})
+        extra['day_evidence']='첫날은 시스템 단서가 없습니다. 서로의 말과 행동만 보고 판단하세요.'
+        extra['discussion_task']=random.choice(MAFIA_FIRST_DAY_TASKS)
+        append_private_notice(room,p,'1일차 · 시스템 단서 없음')
+        append_private_notice(room,p,'첫 토론 행동 · '+extra['discussion_task'])
+
+
+_V4517_START_MAFIA_NIGHT=start_mafia_night
+def start_mafia_night(room):
+    _V4517_START_MAFIA_NIGHT(room)
+    gd=room.get('game_data',{})
+    if int(gd.get('mafia_day',1))==1 and gd.get('mafia_first_night_no_actions'):
+        gd['interaction_total']=5
+        room['interaction_deadline']=now()+5
+        room['deadline']=room['interaction_deadline']
+        room['public']['event_text']='첫날 밤에는 행동이 없습니다. 역할만 확인하고 바로 첫 토론을 준비하세요.'
+
+
+_V4517_RESOLVE_MAFIA_NIGHT=resolve_mafia_night
+def resolve_mafia_night(room):
+    gd=room.get('game_data',{})
+    if int(gd.get('mafia_day',1))!=1 or not gd.get('mafia_first_night_no_actions'):
+        return _V4517_RESOLVE_MAFIA_NIGHT(room)
+    gd['mafia_actions']={}
+    gd['mafia_last_kill_target']=None
+    gd['mafia_police_results']={}
+    _mafia_first_day_neutral_info(room)
+    text='첫날 밤은 조용히 지나갔습니다. 사망자도, 조사 결과도 없습니다.'
+    room['round_result']={'stage':'mafia_morning','title':'첫날 아침','text':text}
+    room['public']['event_title']='☀️ 첫날 아침'
+    room['public']['event_text']=text+' 첫 토론은 시스템 단서 없이 시작합니다.'
+    gd['mafia_stage']='morning'
+    gd['interaction_total']=5
+    room['interaction_deadline']=now()+5
+    room['deadline']=room['interaction_deadline']
+
+
+_V4517_MAFIA_DISCUSSION_SECONDS=mafia_discussion_seconds
+def mafia_discussion_seconds(room):
+    gd=room.get('game_data',{})
+    if int(gd.get('mafia_day',1))==1:
+        initial=int(gd.get('mafia_initial_n') or len(active_pids(room)))
+        if initial<=5:return 65
+        if initial==6:return 70
+        if initial<=8:return 75
+        return 85
+    return _V4517_MAFIA_DISCUSSION_SECONDS(room)
+
+
+_V4517_START_MAFIA_DISCUSS=start_mafia_discuss
+def start_mafia_discuss(room):
+    _V4517_START_MAFIA_DISCUSS(room)
+    gd=room.get('game_data',{})
+    if int(gd.get('mafia_day',1))==1:
+        sec=int(gd.get('mafia_discuss_total') or mafia_discussion_seconds(room))
+        room['public']['event_title']=f'1일차 첫 토론 · {sec}초'
+        room['public']['event_text']='첫날은 시스템 단서가 없습니다. 누가 무엇을 주장하는지, 질문을 피하는지, 의심 근거가 일관적인지만 보세요.'
+
+
+_V4517_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V4517_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.17';return out
+
+_V4517_GET=Handler.do_GET
+def _v4517_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.17'})
+    return _V4517_GET(self)
+Handler.do_GET=_v4517_do_get
