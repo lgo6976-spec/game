@@ -1,0 +1,37 @@
+<style>
+/* v4.5.10: safe, stable quiz/choice buttons */
+.quizOption4510{position:relative;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.quizOption4510.selected{border-color:var(--accent2);box-shadow:0 0 0 2px rgba(98,88,231,.18)}.quizOption4510:disabled{opacity:.62}.quizSubmitState4510{margin-top:9px;font-size:11px;color:var(--muted);font-weight:850}.smallChoice4510.selected{outline:2px solid var(--accent2);outline-offset:1px}.smallChoice4510:disabled{opacity:.62}
+</style>
+<script>
+let _quizSending4510=false;
+let _quizLocalChoice4510=null;
+let _quizLocalKey4510='';
+function quizKey4510(){let gd=S?.game_data_public||{};return [S?.room||'',gd.quiz_index||0,S?.round_no||0].join('|')}
+async function submitQuizChoice4510(index){
+  if(_quizSending4510||S?.game_data_public?.my_submitted)return;
+  let opts=S?.assignment?.extra?.options||[],choice=opts[index];if(choice===undefined)return toast('보기를 다시 선택해 주세요');
+  _quizSending4510=true;_quizLocalChoice4510=index;renderQuizActions4510();
+  try{await act('submit',{choice})}catch(e){_quizSending4510=false;_quizLocalChoice4510=null;renderQuizActions4510();throw e}
+}
+function renderQuizActions4510(){
+  if(S?.game_id!=='quiz')return;
+  let d=$('privateActions'),m=$('minorActions'),a=S.assignment||{},gd=S.game_data_public||{},stage=gd.quiz_stage,submitted=gd.my_submitted,key=quizKey4510();m.innerHTML='';
+  if(_quizLocalKey4510!==key){_quizLocalKey4510=key;_quizLocalChoice4510=null;_quizSending4510=false}
+  if(stage==='answer'&&!submitted){
+    let opts=a.extra?.options||[];
+    d.dataset.sig='quiz4510-'+key+'-'+opts.join('|');
+    d.innerHTML=`<div class="quizOptions">${opts.map((o,i)=>`<button type="button" class="quizOption quizOption4510 ${_quizLocalChoice4510===i?'selected':''}" ${_quizSending4510?'disabled':''} onclick="submitQuizChoice4510(${i})"><span>${String.fromCharCode(65+i)}</span><b>${esc(o)}</b></button>`).join('')}</div><div class="quizSubmitState4510">${_quizSending4510?'선택을 제출하는 중입니다…':'정답이라고 생각하는 보기를 한 번 탭하세요.'}</div>`;
+    return;
+  }
+  if(stage==='answer'&&submitted){_quizSending4510=false;d.dataset.sig='quiz4510-submitted-'+key;d.innerHTML=`<div class="notice">선택 완료 · ${gd.submitted||0}/${gd.needed||0}명 응답</div>`;return}
+  _quizSending4510=false;d.dataset.sig='quiz4510-result-'+key;d.innerHTML='<div class="notice">정답과 친구들의 선택을 공개하는 중입니다.</div>';
+}
+
+// Override only quiz rendering after all older wrappers. This avoids embedding answer text inside onclick HTML.
+const _v4510RenderActions=renderActions;
+renderActions=function(){if(S?.game_id==='quiz')return renderQuizActions4510();return _v4510RenderActions()};
+
+// Also harden shared A/B-style buttons that used the same unsafe inline-string pattern.
+function smallAnswerButtons(options){return `<div class="smallChoiceGrid">${(options||[]).map((o,i)=>`<button type="button" class="smallChoice ${i===0?'primaryPick':''}" onclick="submitSmallChoice4510(${i})">${esc(o)}</button>`).join('')}</div>`}
+async function submitSmallChoice4510(index){let opts=S?.assignment?.extra?.options||[],choice=opts[index];if(choice===undefined)return toast('보기를 다시 선택해 주세요');return act('submit',{choice})}
+</script>
