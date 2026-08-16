@@ -1,0 +1,20 @@
+<style>
+/* v4.5.16 · first-night Mafia preparation state */
+.mafiaFirstNight4516{padding:18px 16px;border-radius:20px;border:1px solid rgba(117,104,248,.48);background:linear-gradient(145deg,rgba(117,104,248,.17),rgba(117,104,248,.06));text-align:center;margin-top:10px}.mafiaFirstNight4516 .icon{font-size:36px}.mafiaFirstNight4516 .title{font-size:21px;font-weight:1000;margin-top:6px}.mafiaFirstNight4516 .body{font-size:13px;line-height:1.55;color:var(--muted);margin-top:7px}.mafiaFirstNight4516 .rule{margin-top:12px;display:grid;gap:7px}.mafiaFirstNight4516 .rule div{padding:10px 11px;border-radius:13px;background:var(--soft);border:1px solid var(--line);font-size:12px;font-weight:900}
+</style>
+<script>
+const _v4516MafiaStageInfo=mafiaStageInfo4514;
+mafiaStageInfo4514=function(){let gd=S?.game_data_public||{};if(gd.first_night_no_actions)return {icon:'🌙',name:'첫날 밤 · 준비',desc:'첫날에는 제거·조사·보호 없이 역할만 확인합니다.',cls:'night',day:1};return _v4516MafiaStageInfo()};
+
+const _v4516RenderMafiaUI=renderMafiaUI;
+renderMafiaUI=function(){
+ if(S?.game_id==='mafia'&&S?.game_data_public?.first_night_no_actions){
+   let d=$('privateActions'),m=$('minorActions'),a=S.assignment||{},role=a.role||'시민';m.innerHTML='';
+   let roleText=role==='마피아'?'첫날에는 제거할 수 없습니다. 2일차 밤부터 제거 대상을 선택합니다.':role==='경찰'?'첫날에는 조사할 수 없습니다. 2일차 밤부터 한 명을 조사합니다.':role==='의사'?'첫날에는 보호하지 않습니다. 2일차 밤부터 보호 대상을 선택합니다.':'첫날 밤에는 별도 행동이 없습니다. 첫 토론을 준비하세요.';
+   d.dataset.sig=JSON.stringify(['mafia4516-first-night',role]);
+   d.innerHTML=`<div class="mafiaFirstNight4516"><div class="icon">🌙</div><div class="title">첫날 밤 · 행동 없음</div><div class="body">${esc(roleText)}</div><div class="rule"><div>🔪 마피아 · 제거 불가</div><div>👮 경찰 · 조사 불가</div><div>🩺 의사 · 보호 없음</div></div><div class="body">잠시 후 자동으로 첫날 아침과 토론으로 넘어갑니다.</div></div>`;
+   ensureMafiaHud4514();return;
+ }
+ return _v4516RenderMafiaUI();
+};
+</script>
