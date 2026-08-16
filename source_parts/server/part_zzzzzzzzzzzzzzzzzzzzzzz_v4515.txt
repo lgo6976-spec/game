@@ -1,0 +1,10 @@
+# v4.5.15: app-wide mobile UI/UX polish release marker.
+_V4515_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V4515_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.15';return out
+
+_V4515_GET=Handler.do_GET
+def _v4515_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.15'})
+    return _V4515_GET(self)
+Handler.do_GET=_v4515_do_get
