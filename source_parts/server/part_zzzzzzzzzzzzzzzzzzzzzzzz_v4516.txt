@@ -1,0 +1,79 @@
+# v4.5.16: Mafia first night is an action-free preparation night for every player count.
+
+_V4516_START_MAFIA_NIGHT=start_mafia_night
+def start_mafia_night(room):
+    gd=room.get('game_data',{})
+    if int(gd.get('mafia_day',1))!=1:
+        return _V4516_START_MAFIA_NIGHT(room)
+    gd['mafia_stage']='night'
+    gd['mafia_actions']={}
+    gd['mafia_candidates']=[]
+    gd['mafia_nomination_votes']={}
+    gd['mafia_final_votes']={}
+    gd['mafia_first_night_no_actions']=True
+    gd['mafia_scout_night']=False
+    room['submissions']={};room['votes']={};room['round_result']=None
+    for p in mafia_alive(room):
+        role=(room.get('assignments',{}).get(p) or {}).get('role','시민')
+        room['assignments'][p]['mission']='첫날 밤에는 행동하지 않습니다. 역할을 확인하고 첫 토론을 준비하세요.'
+        if role=='마피아':append_private_notice(room,p,'첫날 밤 · 제거할 수 없습니다. 2일차 밤부터 제거 행동이 시작됩니다.')
+        elif role=='경찰':append_private_notice(room,p,'첫날 밤 · 조사할 수 없습니다. 2일차 밤부터 조사 행동이 시작됩니다.')
+        elif role=='의사':append_private_notice(room,p,'첫날 밤 · 보호 행동이 없습니다. 2일차 밤부터 보호가 시작됩니다.')
+    room['public']['event_title']='🌙 첫날 밤 · 준비'
+    room['public']['event_text']='첫날 밤에는 아무도 행동하지 않습니다. 역할을 확인하고 첫 토론을 준비하세요.'
+    gd['interaction_total']=8
+    room['interaction_deadline']=now()+8
+    room['deadline']=room['interaction_deadline']
+
+
+_V4516_MAFIA_NIGHT_ACTION=mafia_night_action
+def mafia_night_action(room,pid,target):
+    gd=room.get('game_data',{})
+    if int(gd.get('mafia_day',1))==1 and gd.get('mafia_stage')=='night':
+        raise ValueError('첫날 밤에는 제거·조사·보호 행동을 할 수 없습니다.')
+    return _V4516_MAFIA_NIGHT_ACTION(room,pid,target)
+
+
+_V4516_RESOLVE_MAFIA_NIGHT=resolve_mafia_night
+def resolve_mafia_night(room):
+    gd=room.get('game_data',{})
+    if int(gd.get('mafia_day',1))!=1 or not gd.get('mafia_first_night_no_actions'):
+        return _V4516_RESOLVE_MAFIA_NIGHT(room)
+    gd['mafia_actions']={}
+    gd['mafia_last_kill_target']=None
+    # Explicitly clear any stale investigation data so no first-night police result can survive from wrappers/state.
+    gd['mafia_police_results']={}
+    # Keep the first daytime discussion playable, but generate only the normal discussion information system;
+    # no information comes from a police investigation or a night kill.
+    try:
+        _mafia_assign_day_info(room)
+    except Exception:
+        pass
+    text='첫날 밤은 조용히 지나갔습니다. 아무도 제거되지 않았고, 조사·보호 행동도 없었습니다.'
+    room['round_result']={'stage':'mafia_morning','title':'첫날 아침','text':text}
+    room['public']['event_title']='☀️ 첫날 아침'
+    room['public']['event_text']=text
+    gd['mafia_stage']='morning'
+    gd['interaction_total']=8
+    room['interaction_deadline']=now()+8
+    room['deadline']=room['interaction_deadline']
+
+
+_V4516_PUBLIC_GAME_DATA=public_game_data
+def public_game_data(room,pid):
+    out=_V4516_PUBLIC_GAME_DATA(room,pid)
+    if room.get('game_id')=='mafia':
+        gd=room.get('game_data',{})
+        out['first_night_no_actions']=bool(int(gd.get('mafia_day',1))==1 and gd.get('mafia_stage')=='night' and gd.get('mafia_first_night_no_actions'))
+    return out
+
+
+_V4516_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V4516_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.16';return out
+
+_V4516_GET=Handler.do_GET
+def _v4516_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.16'})
+    return _V4516_GET(self)
+Handler.do_GET=_v4516_do_get
