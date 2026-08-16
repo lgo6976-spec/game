@@ -1,0 +1,31 @@
+<style>
+/* v4.5.18 · Mafia survivor dashboard + always-visible host skip control */
+.mafiaRoster4518{margin:0 0 12px;border:1px solid var(--line);border-radius:18px;background:var(--panel);padding:12px}.mafiaRosterHead4518{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.mafiaRosterHead4518 strong{font-size:13px}.mafiaRosterCounts4518{font-size:11px;color:var(--muted)}.mafiaRosterGrid4518{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.mafiaRosterPerson4518{display:flex;align-items:center;gap:8px;min-height:44px;padding:8px 9px;border:1px solid var(--line);border-radius:13px;background:var(--soft)}.mafiaRosterPerson4518.dead{opacity:.52;filter:grayscale(.35)}.mafiaRosterDot4518{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:0 0 auto}.mafiaRosterPerson4518.dead .mafiaRosterDot4518{background:var(--danger)}.mafiaRosterName4518{min-width:0;flex:1;font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mafiaRosterState4518{font-size:10px;font-weight:900;color:var(--muted)}.mafiaSkip4518{width:100%;min-height:48px;margin-top:7px}.mafiaSkip4518.locked{opacity:.55}.mafiaDiscussControls4518{display:grid;gap:7px}.mafiaDiscussControls4518 .btn{width:100%}@media(max-width:360px){.mafiaRosterGrid4518{grid-template-columns:1fr}}
+</style>
+<script>
+function mafiaRosterHtml4518(){
+ let ps=(S?.players||[]).filter(p=>p.active),alive=ps.filter(p=>p.alive!==false),dead=ps.filter(p=>p.alive===false);
+ let rows=ps.map(p=>`<div class="mafiaRosterPerson4518 ${p.alive===false?'dead':''}"><span class="mafiaRosterDot4518"></span><span class="mafiaRosterName4518">${esc(p.name)}${p.id===S?.me?.id?' · 나':''}</span><span class="mafiaRosterState4518">${p.alive===false?'☠ 탈락':'생존'}</span></div>`).join('');
+ return `<div class="mafiaRoster4518" id="mafiaRoster4518"><div class="mafiaRosterHead4518"><strong>👥 생존 현황</strong><span class="mafiaRosterCounts4518">생존 ${alive.length} · 탈락 ${dead.length}</span></div><div class="mafiaRosterGrid4518">${rows}</div></div>`;
+}
+function ensureMafiaRoster4518(){
+ if(S?.game_id!=='mafia'||S?.phase!=='play')return;let d=$('privateActions');if(!d)return;
+ document.getElementById('mafiaRoster4518')?.remove();
+ let hud=document.getElementById('mafiaHud4514');if(hud)hud.insertAdjacentHTML('afterend',mafiaRosterHtml4518());else d.insertAdjacentHTML('afterbegin',mafiaRosterHtml4518());
+}
+function mafiaSkipControls4518(){
+ if(S?.game_id!=='mafia'||S?.game_data_public?.mafia_stage!=='discuss'||!isHost())return '';
+ let gd=S.game_data_public||{},wait=Math.max(0,Number(gd.skip_available_in||0)),can=!!gd.can_skip_discussion;
+ let skip=`<button type="button" class="btn danger mafiaSkip4518 ${can?'':'locked'}" ${can?'':'disabled'} onclick="act('mafia_skip_discussion')">${can?'토론 스킵 → 바로 지목':`토론 스킵 · ${wait}초 후`}</button>`;
+ let extend=gd.can_extend_discussion?`<button type="button" class="btn secondary" onclick="act('mafia_extend_discussion')">+1분 연장</button>`:(gd.discussion_extended?`<div class="sub">오늘 토론 연장 사용 완료</div>`:'');
+ return `<div class="mafiaDiscussControls4518">${skip}${extend}</div>`;
+}
+function updateMafiaHostControls4518(){
+ if(S?.game_id!=='mafia'||S?.game_data_public?.mafia_stage!=='discuss'||!isHost())return;
+ let m=$('minorActions');if(m)m.innerHTML=mafiaSkipControls4518();
+}
+const _v4518RenderMafiaUI=renderMafiaUI;
+renderMafiaUI=function(){_v4518RenderMafiaUI();if(S?.game_id!=='mafia')return;ensureMafiaRoster4518();updateMafiaHostControls4518()};
+const _v4518UpdateLiveTimers=updateLiveTimers;
+updateLiveTimers=function(){_v4518UpdateLiveTimers();if(S?.game_id==='mafia'){ensureMafiaRoster4518();updateMafiaHostControls4518()}};
+</script>
