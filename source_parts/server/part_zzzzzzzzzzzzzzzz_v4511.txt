@@ -1,0 +1,10 @@
+# v4.5.11: stable Mafia targeting UI release marker.
+_V4511_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V4511_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.11';return out
+
+_V4511_GET=Handler.do_GET
+def _v4511_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.11'})
+    return _V4511_GET(self)
+Handler.do_GET=_v4511_do_get
