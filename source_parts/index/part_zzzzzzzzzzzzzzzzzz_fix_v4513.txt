@@ -1,0 +1,45 @@
+<style>
+/* v4.5.13 Forbidden Action visibility / alert UX */
+.forbiddenTarget4513{margin:4px 0 12px;padding:15px 16px;border-radius:18px;border:1px solid rgba(117,104,248,.55);background:linear-gradient(145deg,rgba(117,104,248,.18),rgba(117,104,248,.07));text-align:center}.forbiddenTarget4513 .label{font-size:10px;font-weight:950;letter-spacing:.08em;color:var(--muted)}.forbiddenTarget4513 .name{font-size:28px;font-weight:1000;line-height:1.15;margin-top:5px}.forbiddenMission4513{margin-bottom:12px;padding:14px;border-radius:16px;background:var(--soft);border:1px solid var(--line)}.forbiddenMission4513 .label{font-size:10px;font-weight:950;color:var(--muted);margin-bottom:5px}.forbiddenMission4513 .text{font-size:16px;font-weight:900;line-height:1.45}.forbiddenMeta4513{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}.forbiddenMeta4513 .pill4513{flex:1;min-width:120px;padding:10px 11px;border-radius:13px;background:var(--soft);border:1px solid var(--line);font-size:11px;text-align:center}.forbiddenMeta4513 .pill4513 b{display:block;font-size:14px;margin-top:2px}.forbiddenReroll4513{min-height:48px}
+.forbiddenAlert4513{position:fixed;z-index:9999;left:12px;right:12px;top:max(16px,env(safe-area-inset-top));display:none;pointer-events:none}.forbiddenAlert4513.on{display:block;animation:forbiddenPop4513 .25s ease-out}.forbiddenAlertInner4513{max-width:520px;margin:0 auto;padding:18px 17px;border-radius:22px;background:rgba(20,18,33,.97);border:1px solid rgba(144,132,255,.72);box-shadow:0 18px 55px rgba(0,0,0,.42);text-align:center}.forbiddenAlert4513 .kicker{font-size:11px;font-weight:1000;color:#bbb4ff;letter-spacing:.06em}.forbiddenAlert4513 .headline{font-size:24px;font-weight:1000;margin:5px 0}.forbiddenAlert4513 .target{font-size:15px;font-weight:900}.forbiddenAlert4513 .mission{font-size:12px;line-height:1.45;color:#d6d9e2;margin-top:7px}.forbiddenWarn4513 .forbiddenAlertInner4513{border-color:rgba(255,190,80,.72);background:rgba(37,29,16,.97)}.forbiddenWarn4513 .kicker{color:#ffd086}@keyframes forbiddenPop4513{from{transform:translateY(-14px) scale(.97);opacity:0}to{transform:none;opacity:1}}
+html[data-theme="light"] .forbiddenAlertInner4513{background:rgba(255,255,255,.98);color:#17202d;box-shadow:0 18px 55px rgba(30,40,55,.20)}html[data-theme="light"] .forbiddenAlert4513 .mission{color:#4f5b6c}
+</style>
+<script>
+let _forbiddenAlertTimer4513=null;
+let _forbiddenLastVersion4513=null;
+let _forbiddenWarnKey4513=null;
+function ensureForbiddenAlert4513(){
+ if(document.getElementById('forbiddenAlert4513'))return;
+ let el=document.createElement('div');el.id='forbiddenAlert4513';el.className='forbiddenAlert4513';el.innerHTML='<div class="forbiddenAlertInner4513"><div class="kicker" id="forbiddenAlertKicker4513"></div><div class="headline" id="forbiddenAlertHeadline4513"></div><div class="target" id="forbiddenAlertTarget4513"></div><div class="mission" id="forbiddenAlertMission4513"></div></div>';document.body.appendChild(el);
+}
+function showForbiddenAlert4513(kind='new'){
+ ensureForbiddenAlert4513();let el=document.getElementById('forbiddenAlert4513'),a=S?.assignment||{},target=a.target?nameOf(a.target):'';
+ let warn=kind==='warn';el.classList.toggle('forbiddenWarn4513',warn);
+ document.getElementById('forbiddenAlertKicker4513').textContent=warn?'30 SECOND WARNING':'NEW SECRET MISSION';
+ document.getElementById('forbiddenAlertHeadline4513').textContent=warn?'⏱ 곧 미션이 바뀝니다':'🔄 새 미션 도착';
+ document.getElementById('forbiddenAlertTarget4513').textContent=warn?'현재 미션을 마무리하세요':target?`새 대상 · ${target}`:'새 대상 확인';
+ document.getElementById('forbiddenAlertMission4513').textContent=warn?'30초 후 대상과 미션이 자동 교체됩니다.':String(a.mission||'휴대폰에서 새 미션을 확인하세요.');
+ el.classList.add('on');clearTimeout(_forbiddenAlertTimer4513);_forbiddenAlertTimer4513=setTimeout(()=>el.classList.remove('on'),warn?4200:6200);
+ if(audioEnabled){if(warn){tone(330,.08,'triangle',.035);tone(440,.08,'triangle',.03,.12);vibrate([80,50,80])}else{tone(260,.07,'square',.035);tone(390,.08,'triangle',.035,.09);tone(560,.12,'sine',.04,.19);vibrate([120,60,120,60,180])}}
+}
+function forbiddenRemaining4513(){let gd=S?.game_data_public||{};return Math.max(0,Number(gd.forbidden_rotate_remaining||0)-(Date.now()-lastStateAt)/1000)}
+function renderForbidden4513(){
+ if(S?.game_id!=='forbidden'||S?.phase!=='play')return;let a=S.assignment||{},gd=S.game_data_public||{},d=$('privateActions'),m=$('minorActions'),target=a.target?nameOf(a.target):'대상 없음',left=Number(gd.forbidden_rerolls_left??a.extra?.rerolls_left??0);
+ $('role').textContent='🎯 유도자';$('mission').textContent='아래 대상과 금지 행동을 확인하세요.';$('targetLine').textContent='';
+ let sig=JSON.stringify(['forbidden4513',a.extra?.assignment_version,a.target,a.mission,left]);
+ if(d.dataset.sig!==sig){d.dataset.sig=sig;d.innerHTML=`<div class="forbiddenTarget4513"><div class="label">현재 대상</div><div class="name">${esc(target)}</div></div><div class="forbiddenMission4513"><div class="label">유도할 금지 행동 / 미션</div><div class="text">${esc(a.mission||'미션 확인 중')}</div></div><div class="forbiddenMeta4513"><div class="pill4513">자동 교체까지<b id="forbiddenClock4513">${fmt(forbiddenRemaining4513())}</b></div><div class="pill4513">수동 교체<b>${left}회 남음</b></div></div><button class="btn primary full" onclick="act('mission_success')">성공 신고</button>`;}
+ m.innerHTML=left>0?`<button class="btn ghost full forbiddenReroll4513" onclick="act('reroll')">🔄 대상 + 미션 바꾸기 · ${left}회 남음</button>`:`<div class="sub">수동 교체 3회 사용 완료 · 자동 교체를 기다리세요.</div>`;
+}
+const _v4513RenderActions=renderActions;renderActions=function(){if(S?.game_id==='forbidden')return renderForbidden4513();return _v4513RenderActions()};
+const _v4513RenderPlay=renderPlay;renderPlay=function(){_v4513RenderPlay();if(S?.game_id==='forbidden')renderForbidden4513()};
+const _v4513UpdateTimers=updateLiveTimers;updateLiveTimers=function(){_v4513UpdateTimers();if(S?.game_id==='forbidden'&&S?.phase==='play'){let c=document.getElementById('forbiddenClock4513');if(c)c.textContent=fmt(forbiddenRemaining4513())}};
+const _v4513HandleAudio=handleAudio;handleAudio=function(oldS,newS){
+ _v4513HandleAudio(oldS,newS);if(newS?.game_id!=='forbidden'||newS?.phase!=='play')return;
+ let ver=newS.assignment?.extra?.assignment_version||null,oldVer=oldS?.game_id==='forbidden'?oldS.assignment?.extra?.assignment_version:null;
+ if(oldVer&&ver&&oldVer!==ver){setTimeout(()=>showForbiddenAlert4513('new'),30)}
+ let rem=Number(newS.game_data_public?.forbidden_rotate_remaining||999),rot=Number(newS.game_data_public?.forbidden_rotation_count||0),warnKey=`${newS.room}|${rot}`;
+ if(rem>0&&rem<=30&&_forbiddenWarnKey4513!==warnKey){_forbiddenWarnKey4513=warnKey;setTimeout(()=>showForbiddenAlert4513('warn'),40)}
+ _forbiddenLastVersion4513=ver;
+};
+ensureForbiddenAlert4513();
+</script>
