@@ -1,0 +1,20 @@
+<style>
+/* v4.5.20 · explicit no-elimination vote card */
+.mafiaNoKill4520{grid-column:1/-1;min-height:76px!important;border-style:dashed!important}.mafiaNoKill4520:not(:disabled){border-color:rgba(57,207,157,.55)!important;background:rgba(57,207,157,.08)!important}.mafiaNoKill4520.selected{border-style:solid!important;border-color:var(--ok)!important;background:rgba(57,207,157,.15)!important}.mafiaNoKill4520:disabled{opacity:.48}.mafiaNoKill4520 .mafiaAvatar4514{background:rgba(57,207,157,.13)!important;font-size:17px!important}.mafiaNoKillNote4520{grid-column:1/-1;text-align:center;font-size:10px;color:var(--muted);margin-top:-2px}
+</style>
+<script>
+// Present "nobody dies" as a first-class ballot choice instead of a vague abstain action.
+mafiaTargetName4511=function(id){if(id==='abstain')return '아무도 죽지 않는다';return nameOf(id)||'선택한 사람'};
+mafiaPickerHtml4511=function(stage){
+ let people=mafiaTargetPeople4511(stage),sel=selectedMafiaTarget4511(stage),info=mafiaActionInfo4511(stage);
+ let buttons=people.map((p,i)=>`<button type="button" class="mafiaPerson4511 ${sel===p.id?'selected':''}" onclick="mafiaPick4511('${stage}',${i})"><span class="mafiaAvatar4514">${esc(mafiaInitial4514(p.name))}</span>${esc(p.name)}${sel===p.id?'<small>선택됨</small>':'<small>탭해서 선택</small>'}</button>`).join('');
+ if(stage==='final_vote'){
+   let allowed=!!S.game_data_public?.abstain_allowed;
+   buttons+=`<button type="button" class="mafiaPerson4511 mafiaNoKill4520 ${sel==='abstain'?'selected':''}" ${allowed?'onclick="mafiaPickAbstain4511()"':'disabled'}><span class="mafiaAvatar4514">🕊</span>아무도 죽지 않는다<small>${sel==='abstain'?'✓ 선택됨':allowed?'이번 투표에서 아무도 탈락시키지 않기':'이번에는 반드시 한 명을 결정해야 합니다'}</small></button>`;
+ }
+ let selected=sel?`<div class="mafiaSelected4514">현재 선택 · <strong>${esc(mafiaTargetName4511(sel))}</strong></div>`:'';
+ let label=sel?(sel==='abstain'?'🕊 아무도 죽지 않는다 · 확정':`${mafiaTargetName4511(sel)} · ${info.verb} 확정`):'선택지를 먼저 고르세요';
+ let note=stage==='final_vote'?`<div class="mafiaNoKillNote4520">사람을 탈락시키지 않는 것도 하나의 공식 투표 선택입니다.</div>`:'';
+ return `<div class="mafiaActionTitle4514">👆 ${stage==='final_vote'?'최종 선택':'대상 선택'}</div><div class="mafiaPeople4511">${buttons}${note}</div>${selected}<button type="button" id="mafiaConfirm4511" class="btn ${sel==='abstain'?'secondary':info.tone} full mafiaConfirm4511" ${sel?'':'disabled'} onclick="confirmMafiaPick4511('${stage}')">${esc(label)}</button><div class="mafiaPickHint4511">선택한 항목은 테두리와 체크 표시로 강조됩니다.</div>`;
+};
+</script>
