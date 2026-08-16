@@ -1,0 +1,66 @@
+<style>
+/* v4.5.15 · app-wide mobile UI/UX polish */
+:root{--tap:52px;--radius-lg:20px;--radius-md:15px}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}body{-webkit-tap-highlight-color:transparent;overscroll-behavior-y:none}
+button,.btn,.iconbtn,summary,label{touch-action:manipulation}.app{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));padding-bottom:118px}
+.top{height:60px}.brand{font-size:21px}.chip,.iconbtn{min-height:42px}.iconbtn{min-width:42px}.btn{min-height:var(--tap);padding:14px 16px;transition:transform .1s,opacity .15s,filter .15s,box-shadow .15s}.btn:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid rgba(117,104,248,.34);outline-offset:2px}.btn:disabled,button:disabled{cursor:not-allowed;opacity:.48;transform:none!important}.btn.primary:not(:disabled){box-shadow:0 8px 22px rgba(255,101,95,.16)}
+.card,.nowCard,.game{box-shadow:0 10px 32px rgba(0,0,0,.18)}.card{border-radius:22px}.title{line-height:1.25}.sub{line-height:1.6}.label{letter-spacing:.015em}input,select,textarea{min-height:48px;font-size:16px}textarea{line-height:1.5}
+summary{position:relative;min-height:44px;display:flex;align-items:center;padding-right:30px}summary:after{content:'⌄';position:absolute;right:5px;top:50%;transform:translateY(-52%);font-size:18px;color:var(--muted);transition:transform .15s}details[open]>summary:after{transform:translateY(-48%) rotate(180deg)}
+.bottom{padding-top:34px;padding-bottom:calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(7,9,13,.91) 30%,rgba(7,9,13,.985) 58%);backdrop-filter:blur(4px)}.bottom .inner{gap:8px}.bottom .btn{min-height:52px}
+.playHead{position:sticky;top:60px;z-index:20;margin:0 -4px 10px;padding:8px 4px 6px;background:linear-gradient(180deg,var(--bg) 70%,transparent)}.gameTiny{font-size:14px}.timerTiny{font-variant-numeric:tabular-nums}.interaction{height:6px;margin-bottom:12px}.nowCard{padding:17px;border-radius:23px}.nowLabel{font-size:11px}.role{font-size:12px;padding:7px 9px}.target{font-size:12px;font-weight:850}.mission{font-size:clamp(22px,6vw,30px);line-height:1.38;margin-bottom:16px}.actionBox .btn{font-size:15px}.minorActions{flex-wrap:wrap}.minorActions .btn{min-height:42px}.eventTicker{position:relative;padding:13px 14px 13px 16px;border-radius:16px}.eventTicker:before{content:'';position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:99px;background:var(--accent2)}.eventTicker b{font-size:11px;letter-spacing:.03em}.eventTicker div{font-size:13px;line-height:1.5}.roundResult{border-radius:17px;padding:14px}.scoreline{min-height:42px;align-items:center}.waiting strong{font-variant-numeric:tabular-nums}
+.toast{max-width:calc(100vw - 28px);white-space:normal;text-align:center;line-height:1.4;font-size:12px;padding:11px 15px;bottom:calc(92px + env(safe-area-inset-bottom));box-shadow:0 10px 35px rgba(0,0,0,.3)}
+.uiConnection4515{position:fixed;z-index:10000;left:50%;top:max(66px,calc(env(safe-area-inset-top) + 58px));transform:translate(-50%,-10px);width:min(92vw,480px);padding:11px 14px;border-radius:14px;background:rgba(55,21,27,.97);border:1px solid rgba(255,103,109,.5);color:#ffd8dc;font-size:12px;font-weight:900;text-align:center;opacity:0;pointer-events:none;transition:.18s;box-shadow:0 14px 35px rgba(0,0,0,.28)}.uiConnection4515.on{opacity:1;transform:translate(-50%,0)}
+.uiActionBar4515{position:fixed;z-index:10001;left:0;right:0;top:0;height:3px;opacity:0;overflow:hidden;pointer-events:none}.uiActionBar4515.on{opacity:1}.uiActionBar4515:after{content:'';display:block;width:38%;height:100%;background:linear-gradient(90deg,var(--accent2),var(--accent));animation:uiLoad4515 .9s infinite ease-in-out}@keyframes uiLoad4515{0%{transform:translateX(-110%)}100%{transform:translateX(300%)}}
+body.uiBusy4515 .btn:not(.uiAllow4515){filter:saturate(.85);opacity:.72}
+.gameFilters4515{grid-column:1/-1;position:sticky;top:62px;z-index:18;display:flex;gap:7px;overflow-x:auto;padding:8px 1px 10px;margin:0 0 3px;background:linear-gradient(180deg,var(--bg) 75%,transparent);scrollbar-width:none}.gameFilters4515::-webkit-scrollbar{display:none}.gameFilter4515{flex:0 0 auto;min-height:38px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);padding:8px 12px;font-size:11px;font-weight:950}.gameFilter4515.on{background:var(--accent2);border-color:var(--accent2);color:#fff}.gameFilterCount4515{grid-column:1/-1;font-size:11px;color:var(--muted);margin:-2px 2px 4px}.gameCard456{scroll-margin-top:118px}.gameCard456 .btn{margin-top:auto}.gameMetaItem456{min-height:56px}.gameDesc456{line-height:1.58}
+#result .card:first-child{padding-top:22px}#winner{line-height:1.15;letter-spacing:-.035em}#result .row .btn{flex:1;min-width:120px}
+#lobby .qr{max-width:min(205px,60vw);height:auto;aspect-ratio:1}.players .player{min-height:34px;display:inline-flex;align-items:center}.code{font-variant-numeric:tabular-nums}
+@media(max-width:520px){.app{padding-left:10px;padding-right:10px}.top{height:56px}.brand small{display:none}.roomChipCompact4515 #roomTxt{max-width:105px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}.playHead{top:56px}.gameFilters4515{top:58px}.hero{padding-top:18px}.card{padding:15px}.nowCard{padding:15px}.bottom .inner{gap:6px}.bottom .btn{padding-left:10px;padding-right:10px;font-size:13px}#result .row{display:grid;grid-template-columns:1fr 1fr}#result .row .btn:first-child{grid-column:1/-1}.gamePickerHead{padding:13px!important}.gameCard456{padding:14px!important}}
+@media(max-width:370px){.brand{font-size:19px}.chip,.iconbtn{padding-left:8px;padding-right:8px}.gameFilters4515{margin-left:-2px;margin-right:-2px}.bottom .btn{font-size:12px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
+html[data-theme="light"] .bottom{background:linear-gradient(transparent,rgba(245,247,251,.92) 30%,rgba(245,247,251,.99) 58%)}html[data-theme="light"] .playHead,html[data-theme="light"] .gameFilters4515{background:linear-gradient(180deg,var(--bg) 75%,transparent)}html[data-theme="light"] .uiConnection4515{background:rgba(255,240,242,.98);color:#a82738;border-color:#e7b5bd}
+</style>
+<script>
+// ---------- global feedback / accessibility ----------
+function ensureGlobalUx4515(){
+ document.body.classList.add('roomChipCompact4515');
+ let toastEl=document.getElementById('toast');if(toastEl){toastEl.setAttribute('role','status');toastEl.setAttribute('aria-live','polite')}
+ if(!document.getElementById('uiConnection4515')){let x=document.createElement('div');x.id='uiConnection4515';x.className='uiConnection4515';x.setAttribute('role','status');x.textContent='연결이 불안정합니다 · 자동으로 다시 연결하고 있어요';document.body.appendChild(x)}
+ if(!document.getElementById('uiActionBar4515')){let x=document.createElement('div');x.id='uiActionBar4515';x.className='uiActionBar4515';document.body.appendChild(x)}
+ document.querySelectorAll('button').forEach(b=>{if(!b.getAttribute('type'))b.setAttribute('type','button')});
+}
+ensureGlobalUx4515();
+const _v4515SetConnection=setConnection;
+setConnection=function(ok){_v4515SetConnection(ok);let b=document.getElementById('uiConnection4515');if(b)b.classList.toggle('on',!ok)};
+let _uiBusyCount4515=0;
+function setUiBusy4515(on){_uiBusyCount4515=Math.max(0,_uiBusyCount4515+(on?1:-1));let active=_uiBusyCount4515>0;document.body.classList.toggle('uiBusy4515',active);document.getElementById('uiActionBar4515')?.classList.toggle('on',active)}
+const _v4515Act=act;
+act=async function(type,extra={}){setUiBusy4515(true);try{return await _v4515Act(type,extra)}finally{setUiBusy4515(false)}};
+
+// ---------- game discovery filters ----------
+let _gameFilter4515='all';
+const GAME_FILTERS4515=[['all','전체'],['quick','⚡ 빠르게'],['mind','🧠 추리·심리'],['social','💬 친목'],['team','🤝 팀전'],['main','🎬 메인게임']];
+function gameBucket4515(id){let out=[];if(['reaction','bomb','chosung','number','choice','quiz','match','oddq'].includes(id))out.push('quick');if(['mafia','night','infection','bluff','betray','bounty','oddq'].includes(id))out.push('mind');if(['oddq','anon','match','choice','forbidden','secret'].includes(id))out.push('social');if(['teamsync','infection'].includes(id))out.push('team');if(['mafia','night','bounty','infection','betray','forbidden'].includes(id))out.push('main');return out}
+function setGameFilter4515(key){_gameFilter4515=key;applyGameFilter4515()}
+function applyGameFilter4515(){
+ let grid=document.getElementById('gamesGrid');if(!grid)return;let cards=[...grid.querySelectorAll('.gameCard456')],shown=0;
+ cards.forEach(card=>{let id=card.dataset.gameId4515||'',show=_gameFilter4515==='all'||gameBucket4515(id).includes(_gameFilter4515);card.classList.toggle('hidden',!show);if(show)shown++});
+ grid.querySelectorAll('.gamePickerSection').forEach(x=>x.classList.toggle('hidden',_gameFilter4515!=='all'));
+ grid.querySelectorAll('.gameFilter4515').forEach(x=>x.classList.toggle('on',x.dataset.filter===_gameFilter4515));let c=document.getElementById('gameFilterCount4515');if(c)c.textContent=_gameFilter4515==='all'?`전체 ${cards.length}개 게임`:`조건에 맞는 게임 ${shown}개`;
+}
+const _v4515RenderGames=renderGames;
+renderGames=function(){
+ _v4515RenderGames();let grid=document.getElementById('gamesGrid');if(!grid)return;let cards=[...grid.querySelectorAll('.gameCard456')];
+ cards.forEach(card=>{let title=card.querySelector('.gameName')?.textContent?.trim(),g=(S?.games||[]).find(x=>x.title===title);if(g)card.dataset.gameId4515=g.id});
+ if(!document.getElementById('gameFilters4515')){let bar=document.createElement('div');bar.id='gameFilters4515';bar.className='gameFilters4515';bar.innerHTML=GAME_FILTERS4515.map(([k,t])=>`<button class="gameFilter4515" data-filter="${k}" onclick="setGameFilter4515('${k}')">${t}</button>`).join('');let count=document.createElement('div');count.id='gameFilterCount4515';count.className='gameFilterCount4515';let head=grid.querySelector('.gamePickerHead');if(head){head.insertAdjacentElement('afterend',bar);bar.insertAdjacentElement('afterend',count)}else{grid.prepend(count);grid.prepend(bar)}}
+ applyGameFilter4515();
+};
+
+// ---------- small global render polish ----------
+const _v4515RenderPlay=renderPlay;
+renderPlay=function(){_v4515RenderPlay();document.body.dataset.game=S?.game_id||'';document.body.dataset.phase=S?.phase||'';let timer=document.getElementById('timer');if(timer)timer.setAttribute('aria-label','남은 시간');let main=document.getElementById('mission');if(main)main.setAttribute('aria-live','polite')};
+const _v4515RenderResult=renderResult;
+renderResult=function(){_v4515RenderResult();let r=document.getElementById('result');if(r)r.querySelectorAll('.btn').forEach(b=>b.setAttribute('type','button'))};
+const _v4515RenderLobby=renderLobby;
+renderLobby=function(){_v4515RenderLobby();ensureGlobalUx4515()};
+</script>
