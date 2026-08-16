@@ -1,0 +1,87 @@
+# v4.5.19: remove citizen clues that guarantee one of a named group is Mafia.
+# Town information stays observational/behavioral; only Police gets exact alignment information.
+
+
+def _v4519_observation_clue(room,viewer):
+    gd=room.get('game_data',{});alive=[p for p in mafia_alive(room) if p!=viewer]
+    actors=set(gd.get('mafia_actions',{}).keys())
+    if not alive:
+        return '관찰 기록: 비교할 수 있는 생존자가 없습니다.'
+    size=min(3,len(alive))
+    cands=random.sample(alive,size)
+    count=sum(1 for p in cands if p in actors)
+    names=' / '.join(_mafia_name(room,p) for p in cands)
+    if int(gd.get('mafia_day',1))<=1:
+        return '첫날 관찰: 시스템이 마피아 후보를 직접 알려주지 않습니다. 말투·주장·투표 행동을 비교하세요.'
+    return f'야간 관찰: {names} 중 밤 행동을 제출한 사람은 {count}명입니다. 이 정보만으로 직업이나 마피아 여부는 확정할 수 없습니다.'
+
+
+def _v4519_small_assign_day_info(room):
+    gd=room['game_data'];day=int(gd.get('mafia_day',1));alive=mafia_alive(room);police_results=gd.get('mafia_police_results',{})
+    for p in alive:
+        ass=room['assignments'].get(p) or {};role=ass.get('role');extra=ass.setdefault('extra',{})
+        extra['discussion_task']=random.choice(MAFIA_DISCUSSION_TASKS)
+        if day<=1:
+            if role=='마피아':evidence='위장 준비: 첫날에는 시스템 보증 단서가 없습니다. 시민처럼 자연스럽게 주장하세요.'
+            elif role=='경찰':evidence='경찰 기록: 첫날 밤에는 조사를 하지 않았습니다.'
+            elif role=='의사':evidence='의사 기록: 첫날 밤에는 보호 행동이 없었습니다.'
+            else:evidence='첫날 관찰: 시스템이 특정 후보군에 마피아가 있다고 알려주지 않습니다. 대화와 반응을 관찰하세요.'
+        elif role=='마피아':
+            # Mafia may bluff about observations, but never with a guaranteed-Mafia set claim.
+            candidates=[x for x in alive if x!=p]
+            sample=random.sample(candidates,min(3,len(candidates))) if candidates else []
+            names=' / '.join(_mafia_name(room,x) for x in sample)
+            fake=random.randint(0,len(sample)) if sample else 0
+            evidence=f'위장 카드: “야간 관찰로 {names} 중 행동 제출자가 {fake}명이었다”고 주장해 볼 수 있습니다. 실제 기록과 다를 수 있습니다.' if sample else '위장 카드: 시민처럼 관찰 정보를 만들어 주장할 수 있습니다.'
+        elif role=='경찰':evidence=police_results.get(p) or '경찰 조사: 이번 밤에는 유효한 조사 결과가 없습니다.'
+        elif role=='의사':
+            protected=gd.get('mafia_actions',{}).get(p);attacked=gd.get('mafia_last_kill_target');blocked=bool(protected and attacked and protected==attacked)
+            evidence='의사 기록: 어젯밤 당신의 보호가 실제 공격을 막았습니다.' if blocked else '의사 기록: 보호 대상에서 공격을 막았다는 확실한 흔적은 없었습니다.'
+        else:evidence=_v4519_observation_clue(room,p)
+        extra['day_evidence']=evidence
+        append_private_notice(room,p,f'{day}일차 개인 정보 · '+evidence)
+        append_private_notice(room,p,'토론 행동 · '+extra['discussion_task'])
+
+
+_V4519_ASSIGN_DAY_INFO=_mafia_assign_day_info
+def _mafia_assign_day_info(room):
+    if _mafia_small(room):return _v4519_small_assign_day_info(room)
+    # Larger groups also avoid guaranteed Mafia-containing candidate sets for ordinary citizens.
+    gd=room['game_data'];day=int(gd.get('mafia_day',1));police_results=gd.get('mafia_police_results',{})
+    for p in mafia_alive(room):
+        ass=room['assignments'].get(p) or {};role=ass.get('role');extra=ass.setdefault('extra',{})
+        extra['discussion_task']=random.choice(MAFIA_DISCUSSION_TASKS)
+        if day<=1:
+            evidence='첫날 관찰: 시스템 보증 용의자 단서는 없습니다. 서로의 발언과 반응을 비교하세요.' if role!='마피아' else '위장 준비: 첫날에는 시스템 보증 단서가 없습니다.'
+        elif role=='경찰':evidence=police_results.get(p) or '경찰 조사: 이번 밤에는 유효한 조사 결과가 없습니다.'
+        elif role=='의사':
+            protected=gd.get('mafia_actions',{}).get(p);attacked=gd.get('mafia_last_kill_target');blocked=bool(protected and attacked and protected==attacked)
+            evidence='의사 기록: 어젯밤 당신의 보호가 실제 공격을 막았습니다.' if blocked else '의사 기록: 보호가 공격을 막았다는 확실한 흔적은 없었습니다.'
+        elif role=='마피아':
+            evidence='위장 카드: 시민처럼 야간 행동·투표·주장에 대한 관찰 정보를 만들어 주장할 수 있습니다. 시스템이 보장한 마피아 후보군을 주장할 수는 없습니다.'
+        else:evidence=_v4519_observation_clue(room,p)
+        extra['day_evidence']=evidence
+        append_private_notice(room,p,f'{day}일차 토론 정보 · '+evidence)
+        append_private_notice(room,p,'토론 행동 · '+extra['discussion_task'])
+
+
+# Clean user-facing description inherited from older small-group balance patches.
+GAMES['mafia'].update(
+    desc='역할 정보와 실제 토론·투표 행동으로 마피아를 찾아내는 자동 진행 정통 마피아.',
+    guide=[
+        '첫날 밤에는 제거·조사·보호 없이 역할만 확인하고 바로 첫 토론을 시작합니다.',
+        '2일차 밤부터 마피아 제거·경찰 조사·의사 보호가 시작됩니다.',
+        '시민에게 “몇 명 중 한 명은 마피아”처럼 정답 범위를 보장하는 힌트는 주어지지 않습니다.',
+        '토론→용의자 지목→최후변론→결선투표 순서로 진행합니다.'
+    ]
+)
+
+_V4519_STATE_FOR=state_for
+def state_for(room,pid,origin=None):
+    out=_V4519_STATE_FOR(room,pid,origin);out['app_version']='player-first-final-4.5.19';return out
+
+_V4519_GET=Handler.do_GET
+def _v4519_do_get(self):
+    if urllib.parse.urlparse(self.path).path=='/api/health':return self.send_json({'ok':True,'version':'player-first-final-4.5.19'})
+    return _V4519_GET(self)
+Handler.do_GET=_v4519_do_get
